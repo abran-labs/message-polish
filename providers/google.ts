@@ -14,7 +14,7 @@ import type {
     ProviderAdapter,
 } from "../types";
 
-const Native = VencordNative.pluginHelpers.AiImproveText as PluginNative<typeof import("../native")>;
+const Native = VencordNative.pluginHelpers.MessagePolish as PluginNative<typeof import("../native")>;
 
 function createNativeRequestId(prefix: string): string {
     return `${prefix}:${Date.now()}:${Math.random().toString(36).slice(2)}`;

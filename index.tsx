@@ -5,6 +5,7 @@
  */
 
 import { ChatBarButton, ChatBarButtonFactory } from "@api/ChatButtons";
+import { migratePluginSettings } from "@api/Settings";
 import { copyWithToast } from "@utils/discord";
 import definePlugin, { IconComponent } from "@utils/types";
 import { DraftStore, DraftType, Toasts, useStateFromStores } from "@webpack/common";
@@ -206,6 +207,10 @@ export default definePlugin({
 
     stop() {
         inFlightChannels.clear();
+    },
+
+    start() {
+        migratePluginSettings("MessagePolish", "AiImproveText");
     },
 
     chatBarButton: {
