@@ -11,11 +11,12 @@ import { DraftStore, DraftType, Toasts, useStateFromStores } from "@webpack/comm
 
 import { providerAdapters } from "./providers";
 import { settings } from "./settings";
-import { buildImproveTextPrompt, resolveChannelStylePreset } from "./state";
-import type { ImproveTextProviderId } from "./types";
+import { buildImproveTextPrompt, normalizeStylePreset } from "./state";
+import type { ImproveTextProviderId, ImproveTextStylePreset } from "./types";
 
 const inFlightChannels = new Set<string>();
 type ToastType = (typeof Toasts.Type)[keyof typeof Toasts.Type];
+const STYLE_ORDER: ImproveTextStylePreset[] = ["professional", "business", "casual", "concise", "explain"];
 
 const ImproveTextIcon: IconComponent = ({ height = 20, width = 20, className }) => {
     return (
@@ -89,6 +90,30 @@ function validateConfiguration(): { providerId: ImproveTextProviderId; model: st
     return { providerId, model };
 }
 
+function getChannelStyleMemory(): Record<string, ImproveTextStylePreset> {
+    return (settings.store.channelStyleMemory as Record<string, ImproveTextStylePreset> | undefined) ?? {};
+}
+
+function getEffectiveStylePreset(channelId: string): ImproveTextStylePreset {
+    const channelStyle = getChannelStyleMemory()[channelId];
+    return normalizeStylePreset(channelStyle ?? settings.store.stylePreset);
+}
+
+function setEffectiveStylePreset(channelId: string, stylePreset: ImproveTextStylePreset): void {
+    settings.store.channelStyleMemory = {
+        ...getChannelStyleMemory(),
+        [channelId]: stylePreset,
+    };
+}
+
+function cycleStylePreset(channelId: string): void {
+    const currentStyle = getEffectiveStylePreset(channelId);
+    const currentIndex = STYLE_ORDER.indexOf(currentStyle);
+    const nextStyle = STYLE_ORDER[(currentIndex + 1) % STYLE_ORDER.length];
+    setEffectiveStylePreset(channelId, nextStyle);
+    notify(`AI style set to ${nextStyle}.`);
+}
+
 async function improveAndCopyDraft(channelId: string): Promise<void> {
     if (inFlightChannels.has(channelId)) return;
 
@@ -107,7 +132,7 @@ async function improveAndCopyDraft(channelId: string): Promise<void> {
     const timeoutSignal = AbortSignal.timeout(20_000);
 
     try {
-        const stylePreset = resolveChannelStylePreset(channelId, settings.store.stylePreset);
+        const stylePreset = getEffectiveStylePreset(channelId);
         const prompt = buildImproveTextPrompt(input, stylePreset);
         const response = await providerAdapter.improveText({
             providerId,
@@ -145,14 +170,19 @@ export function shouldShowImproveTextButton(options: {
 const ImproveTextButton: ChatBarButtonFactory = ({ isAnyChat, channel: { id: channelId } }) => {
     const { showChatBarButton } = settings.use(["showChatBarButton"]);
     const draft = useStateFromStores([DraftStore], () => getDraft(channelId));
+    const stylePreset = getEffectiveStylePreset(channelId);
 
     if (!shouldShowImproveTextButton({ isAnyChat, showChatBarButton, draft })) return null;
 
     return (
         <ChatBarButton
-            tooltip="Improve with AI and copy result"
+            tooltip={`Improve with AI and copy result (${stylePreset}). Right-click to change style.`}
             onClick={() => {
                 void improveAndCopyDraft(channelId);
+            }}
+            onContextMenu={event => {
+                event.preventDefault();
+                cycleStylePreset(channelId);
             }}
         >
             <ImproveTextIcon />

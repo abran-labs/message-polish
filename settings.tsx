@@ -193,6 +193,11 @@ export const settings = definePluginSettings({
             { label: "Explain", value: "explain" }
         ] as const,
     },
+    channelStyleMemory: {
+        type: OptionType.CUSTOM,
+        default: {},
+        hidden: true,
+    },
     openAiApiKey: {
         type: OptionType.STRING,
         description: "OpenAI API key",
