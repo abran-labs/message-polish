@@ -6,40 +6,16 @@
 
 import { ChatBarButton, ChatBarButtonFactory } from "@api/ChatButtons";
 import definePlugin, { IconComponent } from "@utils/types";
-import { findByPropsLazy } from "@webpack";
 import { DraftStore, DraftType, showToast, Toasts, useStateFromStores } from "@webpack/common";
 
 import { providerAdapters } from "./providers";
 import { settings } from "./settings";
-import {
-    abortAllInFlight,
-    allocateChannelAbortToken,
-    buildImproveTextPrompt,
-    clearChannelAbortToken,
-    commitDraftReplacement,
-    isCurrentChannelAbortToken,
-    patchState,
-    resetState,
-    resolveChannelStylePreset,
-    rollbackDraftReplacement,
-    runWithChannelInFlight,
-    setDraftController,
-} from "./state";
+import { buildImproveTextPrompt, resolveChannelStylePreset } from "./state";
 import type { ImproveTextProviderId } from "./types";
 
-const DraftManager = findByPropsLazy("clearDraft", "saveDraft") as {
-    saveDraft(channelId: string, draftType: number, value: string): void;
-};
-const Transforms = findByPropsLazy("insertNodes", "textToText") as {
-    delete(editor: object, options: object): void;
-    insertText(editor: object, text: string): void;
-};
-const Editor = findByPropsLazy("start", "end", "toSlateRange") as {
-    start(editor: object, path: never[]): object;
-    end(editor: object, path: never[]): object;
-};
-const activeEditorRefByChannel = new Map<string, any>();
-const latestComposerPropsByChannel = new Map<string, any>();
+const armedChannels = new Set<string>();
+const inFlightChannels = new Set<string>();
+type ToastType = (typeof Toasts.Type)[keyof typeof Toasts.Type];
 
 const ImproveTextIcon: IconComponent = ({ height = 20, width = 20, className }) => {
     return (
@@ -58,154 +34,8 @@ const ImproveTextIcon: IconComponent = ({ height = 20, width = 20, className }) 
 
 const getDraft = (channelId: string) => DraftStore.getDraft(channelId, DraftType.ChannelMessage);
 
-function getLiveComposerText(channelId: string): string | null {
-    const composerProps = latestComposerPropsByChannel.get(channelId);
-    return typeof composerProps?.textValue === "string"
-        ? composerProps.textValue
-        : null;
-}
-
-function logDraftDebug(event: string, data: Record<string, unknown>): void {
-    console.warn(`[ai-improve-text] ${event}`, data);
-}
-
-function buildRichValueFromText(richValue: unknown, text: string): unknown[] {
-    const fallback = [{ children: [{ text }] }];
-    if (!Array.isArray(richValue) || richValue.length === 0) {
-        return fallback;
-    }
-
-    const firstNode = richValue[0];
-    if (!firstNode || typeof firstNode !== "object") {
-        return fallback;
-    }
-
-    return [{
-        ...(firstNode as Record<string, unknown>),
-        children: [{ text }],
-    }];
-}
-
-function replaceVisibleComposerText(channelId: string, value: string): boolean {
-    const composerProps = latestComposerPropsByChannel.get(channelId);
-    logDraftDebug("replaceVisibleComposerText:entry", {
-        channelId,
-        hasComposerProps: Boolean(composerProps),
-        hasOnChange: typeof composerProps?.onChange === "function",
-        hasEditorRef: Boolean(activeEditorRefByChannel.get(channelId)),
-        value,
-    });
-
-    if (typeof composerProps?.onChange === "function") {
-        const nextRichValue = buildRichValueFromText(composerProps.richValue, value);
-
-        logDraftDebug("replaceVisibleComposerText:onChange", {
-            channelId,
-            value,
-            onChangeLength: composerProps.onChange.length,
-            textValueType: typeof composerProps.textValue,
-            richValueIsArray: Array.isArray(composerProps.richValue),
-            richValuePreview: Array.isArray(composerProps.richValue)
-                ? composerProps.richValue.slice(0, 2)
-                : composerProps.richValue,
-            nextRichValue,
-        });
-
-        try {
-            composerProps.onChange(nextRichValue, value, composerProps.channel);
-
-            const liveDraft = getDraft(channelId);
-            if (liveDraft === value) {
-                logDraftDebug("replaceVisibleComposerText:onChange-success", {
-                    channelId,
-                    candidate: "rebuilt-richValue-textValue-channel",
-                });
-                return true;
-            }
-
-            logDraftDebug("replaceVisibleComposerText:onChange-mismatch", {
-                channelId,
-                candidate: "rebuilt-richValue-textValue-channel",
-                liveDraft,
-            });
-        } catch (error) {
-            logDraftDebug("replaceVisibleComposerText:onChange-error", {
-                channelId,
-                candidate: "rebuilt-richValue-textValue-channel",
-                message: error instanceof Error ? error.message : String(error),
-                stack: error instanceof Error ? error.stack : null,
-            });
-        }
-    }
-
-    const editorRef = activeEditorRefByChannel.get(channelId);
-    const slateEditor = editorRef?.ref?.current?.getSlateEditor?.();
-    if (!slateEditor) {
-        logDraftDebug("replaceVisibleComposerText:no-editor", {
-            channelId,
-            value,
-            hasEditorRef: Boolean(editorRef),
-        });
-        return false;
-    }
-
-    logDraftDebug("replaceVisibleComposerText:apply", {
-        channelId,
-        value,
-    });
-
-    Transforms.delete(slateEditor, {
-        at: {
-            anchor: Editor.start(slateEditor, []),
-            focus: Editor.end(slateEditor, []),
-        }
-    });
-    if (value.length > 0) {
-        Transforms.insertText(slateEditor, value);
-    }
-
-    return true;
-}
-
-function captureAndForwardEditorRef(originalSetEditorRef: ((ref: any) => void) | undefined, channelId: string) {
-    return (ref: any) => {
-        logDraftDebug("captureAndForwardEditorRef", {
-            channelId,
-            hasRef: Boolean(ref),
-        });
-        if (ref) {
-            activeEditorRefByChannel.set(channelId, ref);
-        } else {
-            activeEditorRefByChannel.delete(channelId);
-        }
-
-        originalSetEditorRef?.(ref);
-    };
-}
-
-function inspectComposerProps(props: any): null {
-    const channelId = props?.channel?.id ?? props?.channelId ?? null;
-    if (channelId) {
-        latestComposerPropsByChannel.set(channelId, props);
-    }
-
-    if (props?.setEditorRef && props?.channel?.id) {
-        props.setEditorRef = captureAndForwardEditorRef(props.setEditorRef, props.channel.id);
-    }
-
-    console.warn("[ai-improve-text] composer-props", {
-        topLevelKeys: props ? Object.keys(props).slice(0, 50) : null,
-        hasSetEditorRef: Boolean(props?.setEditorRef),
-        hasEditorRef: Boolean(props?.editorRef),
-        hasOnChange: typeof props?.onChange === "function",
-        onChangeLength: typeof props?.onChange === "function" ? props.onChange.length : null,
-        textValueType: typeof props?.textValue,
-        richValueIsArray: Array.isArray(props?.richValue),
-        channelId,
-        type: props?.type ?? null,
-    });
-
-    return null;
+function notify(message: string, type: ToastType = Toasts.Type.SUCCESS): void {
+    showToast(message, type);
 }
 
 function getConfiguredProviderId(): ImproveTextProviderId | null {
@@ -228,93 +58,45 @@ function getProviderApiKey(providerId: ImproveTextProviderId): string {
     }
 }
 
-function notifyImproveError(message: string): void {
-    showToast(message, Toasts.Type.FAILURE);
-}
-
-export async function improveDraft(channelId: string): Promise<void> {
+function validateConfiguration(): { providerId: ImproveTextProviderId; model: string; } | null {
     const providerId = getConfiguredProviderId();
     if (providerId == null) {
-        notifyImproveError("Select a valid AI provider in plugin settings.");
-        return;
+        notify("Select a valid AI provider in plugin settings.", Toasts.Type.FAILURE);
+        return null;
     }
 
     const providerAdapter = providerAdapters[providerId];
     if (providerAdapter == null) {
-        notifyImproveError("Selected provider is unavailable.");
-        return;
+        notify("Selected provider is unavailable.", Toasts.Type.FAILURE);
+        return null;
     }
 
     const model = settings.store.model?.trim() ?? "";
     if (!model) {
-        notifyImproveError("Select a model in plugin settings.");
-        return;
+        notify("Select a model in plugin settings.", Toasts.Type.FAILURE);
+        return null;
     }
 
     if (!getProviderApiKey(providerId)) {
-        notifyImproveError(`${providerAdapter.id} API key is missing. Add it in plugin settings.`);
+        notify(`${providerAdapter.id} API key is missing. Add it in plugin settings.`, Toasts.Type.FAILURE);
+        return null;
+    }
+
+    return { providerId, model };
+}
+
+function toggleArmedChannel(channelId: string): void {
+    const configuration = validateConfiguration();
+    if (configuration == null) return;
+
+    if (armedChannels.has(channelId)) {
+        armedChannels.delete(channelId);
+        notify("AI improve cancelled for the next send.");
         return;
     }
 
-    const input = getDraft(channelId)?.trim();
-    if (!input) {
-        return;
-    }
-
-    const stylePreset = resolveChannelStylePreset(channelId, settings.store.stylePreset);
-    const prompt = buildImproveTextPrompt(input, stylePreset);
-
-    try {
-        await runWithChannelInFlight(channelId, async () => {
-            patchState({
-                providerId,
-                isWorking: true,
-                lastError: null,
-            });
-
-            const abortToken = allocateChannelAbortToken(channelId);
-
-            try {
-                const response = await providerAdapter.improveText({
-                    providerId,
-                    model,
-                    input: prompt,
-                    stylePreset,
-                    signal: abortToken.signal,
-                });
-
-                if (!isCurrentChannelAbortToken(channelId, abortToken.token)) return;
-                if (!commitDraftReplacement(channelId, response.output)) {
-                    notifyImproveError("Draft changed while AI was working, so your latest edits were kept.");
-                }
-            } catch (error) {
-                if (isCurrentChannelAbortToken(channelId, abortToken.token)) {
-                    const restored = rollbackDraftReplacement(channelId);
-                    if (!restored) {
-                        notifyImproveError("Draft changed while AI was working, so your latest edits were kept.");
-                        return;
-                    }
-                }
-
-                const providerError = providerAdapter.mapError(error);
-                patchState({ lastError: providerError.message });
-                notifyImproveError(providerError.message);
-            } finally {
-                clearChannelAbortToken(channelId, abortToken.token);
-                patchState({
-                    providerId,
-                    isWorking: false,
-                });
-            }
-        });
-    } catch (error) {
-        if (error instanceof Error && error.message.includes("already in-flight")) {
-            return;
-        }
-
-        rollbackDraftReplacement(channelId);
-        notifyImproveError("Failed to improve text.");
-    }
+    armedChannels.add(channelId);
+    notify("AI improve armed for your next send.");
 }
 
 export function shouldShowImproveTextButton(options: {
@@ -334,62 +116,80 @@ const ImproveTextButton: ChatBarButtonFactory = ({ isAnyChat, channel: { id: cha
 
     if (!shouldShowImproveTextButton({ isAnyChat, showChatBarButton, draft })) return null;
 
+    const armed = armedChannels.has(channelId);
+
     return (
         <ChatBarButton
-            tooltip="Improve text"
-            onClick={() => {
-                void improveDraft(channelId);
-            }}
+            tooltip={armed ? "AI improve armed for next send" : "Improve next send with AI"}
+            onClick={() => toggleArmedChannel(channelId)}
         >
-            <ImproveTextIcon />
+            <span style={{ color: armed ? "var(--brand-500)" : undefined, display: "inline-flex" }}>
+                <ImproveTextIcon />
+            </span>
         </ChatBarButton>
     );
 };
 
 export default definePlugin({
     name: "AiImproveText",
-    description: "Scaffold for improving drafted text via pluggable providers.",
+    description: "Improve your next sent message with AI.",
     authors: [{ name: "Sisyphus", id: 0n }],
     dependencies: ["ChatInputButtonAPI"],
     settings,
-    patches: [{
-        find: ".CREATE_FORUM_POST||",
-        replacement: {
-            match: /(?<=textValue:(\i),editorHeight:\i,channelId:\i\.id\}\)),\i/,
-            replace: ",$self.inspectComposerProps(arguments[0])"
+
+    async onBeforeMessageSend(channelId, messageObj) {
+        if (!armedChannels.has(channelId)) return;
+        armedChannels.delete(channelId);
+
+        if (inFlightChannels.has(channelId)) {
+            return { cancel: true };
         }
-    }],
 
-    inspectComposerProps,
-    captureAndForwardEditorRef,
+        const configuration = validateConfiguration();
+        if (configuration == null) {
+            return { cancel: true };
+        }
 
-    start() {
-        setDraftController({
-            getDraft(channelId) {
-                return getLiveComposerText(channelId)
-                    ?? getDraft(channelId)
-                    ?? "";
-            },
-            replaceDraft(channelId, value) {
-                if (replaceVisibleComposerText(channelId, value)) {
-                    return;
-                }
+        const { providerId, model } = configuration;
+        const providerAdapter = providerAdapters[providerId];
+        const input = messageObj.content?.trim();
+        if (!input) return;
 
-                logDraftDebug("replaceDraft:fallback-saveDraft", {
-                    channelId,
-                    draftType: DraftType.ChannelMessage,
-                    value,
-                });
-                DraftManager.saveDraft(channelId, DraftType.ChannelMessage, value);
+        inFlightChannels.add(channelId);
+        notify("Improving message before send...");
+
+        const timeoutSignal = AbortSignal.timeout(20_000);
+
+        try {
+            const stylePreset = resolveChannelStylePreset(channelId, settings.store.stylePreset);
+            const prompt = buildImproveTextPrompt(input, stylePreset);
+            const response = await providerAdapter.improveText({
+                providerId,
+                model,
+                input: prompt,
+                stylePreset,
+                signal: timeoutSignal,
+            });
+
+            if (!response.output.trim()) {
+                notify("AI returned empty text. Message was not sent.", Toasts.Type.FAILURE);
+                return { cancel: true };
             }
-        });
+
+            messageObj.content = response.output;
+            notify("Message improved with AI.");
+        } catch (error) {
+            const providerError = providerAdapter.mapError(error);
+            notify(providerError.message, Toasts.Type.FAILURE);
+            return { cancel: true };
+        } finally {
+            inFlightChannels.delete(channelId);
+        }
     },
 
     stop() {
-        abortAllInFlight("plugin_stopped");
-        resetState();
-        activeEditorRefByChannel.clear();
-        setDraftController(null);
+        armedChannels.clear();
+        inFlightChannels.clear();
     },
 
     chatBarButton: {
