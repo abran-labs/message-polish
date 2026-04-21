@@ -63,6 +63,23 @@ function logDraftDebug(event: string, data: Record<string, unknown>): void {
     console.warn(`[ai-improve-text] ${event}`, data);
 }
 
+function buildRichValueFromText(richValue: unknown, text: string): unknown[] {
+    const fallback = [{ children: [{ text }] }];
+    if (!Array.isArray(richValue) || richValue.length === 0) {
+        return fallback;
+    }
+
+    const firstNode = richValue[0];
+    if (!firstNode || typeof firstNode !== "object") {
+        return fallback;
+    }
+
+    return [{
+        ...(firstNode as Record<string, unknown>),
+        children: [{ text }],
+    }];
+}
+
 function replaceVisibleComposerText(channelId: string, value: string): boolean {
     const composerProps = latestComposerPropsByChannel.get(channelId);
     logDraftDebug("replaceVisibleComposerText:entry", {
@@ -74,6 +91,8 @@ function replaceVisibleComposerText(channelId: string, value: string): boolean {
     });
 
     if (typeof composerProps?.onChange === "function") {
+        const nextRichValue = buildRichValueFromText(composerProps.richValue, value);
+
         logDraftDebug("replaceVisibleComposerText:onChange", {
             channelId,
             value,
@@ -83,29 +102,30 @@ function replaceVisibleComposerText(channelId: string, value: string): boolean {
             richValuePreview: Array.isArray(composerProps.richValue)
                 ? composerProps.richValue.slice(0, 2)
                 : composerProps.richValue,
+            nextRichValue,
         });
 
         try {
-            composerProps.onChange(composerProps.richValue, value, composerProps.channel);
+            composerProps.onChange(nextRichValue, value, composerProps.channel);
 
             const liveDraft = getDraft(channelId);
             if (liveDraft === value) {
                 logDraftDebug("replaceVisibleComposerText:onChange-success", {
                     channelId,
-                    candidate: "existing-richValue-textValue-channel",
+                    candidate: "rebuilt-richValue-textValue-channel",
                 });
                 return true;
             }
 
             logDraftDebug("replaceVisibleComposerText:onChange-mismatch", {
                 channelId,
-                candidate: "existing-richValue-textValue-channel",
+                candidate: "rebuilt-richValue-textValue-channel",
                 liveDraft,
             });
         } catch (error) {
             logDraftDebug("replaceVisibleComposerText:onChange-error", {
                 channelId,
-                candidate: "existing-richValue-textValue-channel",
+                candidate: "rebuilt-richValue-textValue-channel",
                 message: error instanceof Error ? error.message : String(error),
                 stack: error instanceof Error ? error.stack : null,
             });
