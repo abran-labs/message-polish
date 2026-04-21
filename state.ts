@@ -45,7 +45,7 @@ const inFlightChannels = new Set<string>();
 const abortStateByChannel = new Map<string, ChannelAbortState>();
 const tokenCounterByChannel = new Map<string, number>();
 const loadingPlaceholderIntervalByChannel = new Map<string, ReturnType<typeof setInterval>>();
-const managedDraftValueByChannel = new Map<string, string>();
+const managedDraftValuesByChannel = new Map<string, Set<string>>();
 const stylePresetByChannel = new Map<string, ImproveTextStylePreset>();
 
 export const LOADING_PLACEHOLDER_BASE_TEXT = "AI is improving text";
@@ -125,7 +125,7 @@ export function resetState(): void {
     abortAllInFlight("reset");
     inFlightChannels.clear();
     originalDraftByChannel.clear();
-    managedDraftValueByChannel.clear();
+    managedDraftValuesByChannel.clear();
     stopAllLoadingPlaceholderLoops();
     stylePresetByChannel.clear();
 }
@@ -153,18 +153,24 @@ export function clearOriginalDraftSnapshot(channelId: string): void {
 
 export function replaceCurrentDraft(channelId: string, value: string): void {
     draftController.replaceDraft(channelId, value);
-    managedDraftValueByChannel.set(channelId, value);
+    let managedValues = managedDraftValuesByChannel.get(channelId);
+    if (!managedValues) {
+        managedValues = new Set<string>();
+        managedDraftValuesByChannel.set(channelId, managedValues);
+    }
+
+    managedValues.add(value);
 }
 
 export function clearManagedDraftTracking(channelId: string): void {
-    managedDraftValueByChannel.delete(channelId);
+    managedDraftValuesByChannel.delete(channelId);
 }
 
 export function hasManagedDraftConflict(channelId: string): boolean {
-    const expected = managedDraftValueByChannel.get(channelId);
-    if (expected == null) return false;
+    const managedValues = managedDraftValuesByChannel.get(channelId);
+    if (managedValues == null || managedValues.size === 0) return false;
 
-    return draftController.getDraft(channelId) !== expected;
+    return !managedValues.has(draftController.getDraft(channelId));
 }
 
 export function restoreOriginalDraft(channelId: string): boolean {
