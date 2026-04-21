@@ -8,11 +8,9 @@ import type { PluginNative } from "@utils/types";
 
 import { settings } from "../settings";
 import type {
-    ImproveTextModel,
     ImproveTextProviderError,
     ImproveTextRequest,
     ImproveTextResponse,
-    ListModelsResult,
     ProviderAdapter,
 } from "../types";
 
@@ -52,15 +50,6 @@ class AnthropicConfigurationError extends Error {
     }
 }
 
-type AnthropicModel = {
-    id?: unknown;
-    display_name?: unknown;
-};
-
-type AnthropicModelsApiResponse = {
-    data?: unknown;
-};
-
 type AnthropicTextContentBlock = {
     type?: unknown;
     text?: unknown;
@@ -86,19 +75,6 @@ async function parseJsonSafe(data: string): Promise<unknown> {
     } catch {
         return null;
     }
-}
-
-function normalizeModel(item: AnthropicModel): ImproveTextModel | null {
-    if (typeof item.id !== "string" || !item.id.trim()) return null;
-
-    const displayName = typeof item.display_name === "string" && item.display_name.trim()
-        ? item.display_name
-        : item.id;
-
-    return {
-        id: item.id,
-        label: displayName,
-    };
 }
 
 function extractOutputText(responseBody: AnthropicMessagesApiResponse): string {
@@ -164,32 +140,6 @@ async function fetchAnthropic(dataPromise: Promise<{ status: number; data: strin
 
     const responseBody = await parseJsonSafe(response.data);
     throw new AnthropicHttpError(response.status, responseBody);
-}
-
-async function listModels(request?: { signal?: AbortSignal; }): Promise<ListModelsResult> {
-    const apiKey = getAnthropicApiKey();
-    if (request?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-
-    const requestId = createNativeRequestId("anthropic-models");
-    const unbindAbort = bindAbortToNativeRequest(request?.signal, requestId);
-
-    try {
-        const response = await fetchAnthropic(Native.listAnthropicModels(requestId, apiKey));
-
-        const body = await parseJsonSafe(response) as AnthropicModelsApiResponse;
-        const rawModels = Array.isArray(body.data) ? body.data : [];
-
-        const models = rawModels
-            .map(model => normalizeModel(model as AnthropicModel))
-            .filter((model): model is ImproveTextModel => model !== null);
-
-        return {
-            providerId: "anthropic",
-            models,
-        };
-    } finally {
-        unbindAbort?.();
-    }
 }
 
 async function improveText(request: ImproveTextRequest): Promise<ImproveTextResponse> {
@@ -297,7 +247,6 @@ function mapError(error: unknown): ImproveTextProviderError {
 
 export const anthropicProviderAdapter: ProviderAdapter = {
     id: "anthropic",
-    listModels,
     improveText,
     mapError,
 };

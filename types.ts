@@ -10,21 +10,6 @@ export type ImproveTextStylePreset = "professional" | "business" | "casual" | "c
 // Temporary compatibility type for scaffold/runtime defaults that still use noop.
 export type ImproveTextProviderSelection = ImproveTextProviderId | "noop";
 
-export interface ImproveTextModel {
-    id: string;
-    label: string;
-    description?: string;
-}
-
-export interface ListModelsRequest {
-    signal?: AbortSignal;
-}
-
-export interface ListModelsResult {
-    providerId: ImproveTextProviderId;
-    models: ImproveTextModel[];
-}
-
 export interface ImproveTextRequest {
     providerId: ImproveTextProviderId;
     model: string;
@@ -50,7 +35,6 @@ export interface ImproveTextProviderError {
 
 export interface ProviderAdapter {
     id: ImproveTextProviderId;
-    listModels(request?: ListModelsRequest): Promise<ListModelsResult>;
     improveText(request: ImproveTextRequest): Promise<ImproveTextResponse>;
     mapError(error: unknown): ImproveTextProviderError;
 }

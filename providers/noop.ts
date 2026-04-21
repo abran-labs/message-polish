@@ -9,7 +9,6 @@ import type {
     ImproveTextProviderId,
     ImproveTextRequest,
     ImproveTextResponse,
-    ListModelsResult,
     ProviderAdapter,
 } from "../types";
 
@@ -25,13 +24,6 @@ function createNotImplementedError(providerId: ImproveTextProviderId, error: unk
     };
 }
 
-function createStubModelList(providerId: ImproveTextProviderId): ListModelsResult {
-    return {
-        providerId,
-        models: [],
-    };
-}
-
 function createStubImproveResponse(request: ImproveTextRequest): ImproveTextResponse {
     return {
         providerId: request.providerId,
@@ -44,7 +36,6 @@ function createStubImproveResponse(request: ImproveTextRequest): ImproveTextResp
 export function createStubProviderAdapter(providerId: ImproveTextProviderId): ProviderAdapter {
     return {
         id: providerId,
-        listModels: async () => createStubModelList(providerId),
         improveText: async request => createStubImproveResponse(request),
         mapError: error => createNotImplementedError(providerId, error),
     };

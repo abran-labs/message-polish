@@ -8,11 +8,9 @@ import type { PluginNative } from "@utils/types";
 
 import { settings } from "../settings";
 import type {
-    ImproveTextModel,
     ImproveTextProviderError,
     ImproveTextRequest,
     ImproveTextResponse,
-    ListModelsResult,
     ProviderAdapter,
 } from "../types";
 
@@ -52,18 +50,6 @@ class GoogleConfigurationError extends Error {
     }
 }
 
-type GoogleModel = {
-    name?: unknown;
-    displayName?: unknown;
-    description?: unknown;
-    supportedGenerationMethods?: unknown;
-};
-
-type GoogleListModelsResponse = {
-    models?: unknown;
-    nextPageToken?: unknown;
-};
-
 type GoogleGenerateContentPart = {
     text?: unknown;
 };
@@ -96,30 +82,6 @@ async function parseJsonSafe(data: string): Promise<unknown> {
     } catch {
         return null;
     }
-}
-
-function supportsGenerateContent(item: GoogleModel): boolean {
-    if (!Array.isArray(item.supportedGenerationMethods)) return true;
-
-    return item.supportedGenerationMethods.some(method => method === "generateContent");
-}
-
-function normalizeModel(item: GoogleModel): ImproveTextModel | null {
-    if (typeof item.name !== "string" || !item.name.trim()) return null;
-    if (!supportsGenerateContent(item)) return null;
-
-    const label = typeof item.displayName === "string" && item.displayName.trim()
-        ? item.displayName
-        : item.name;
-    const description = typeof item.description === "string" && item.description.trim()
-        ? item.description
-        : undefined;
-
-    return {
-        id: item.name,
-        label,
-        description,
-    };
 }
 
 function normalizeModelName(model: string): string {
@@ -205,58 +167,6 @@ async function fetchGoogle(dataPromise: Promise<{ status: number; data: string; 
 
     const responseBody = await parseJsonSafe(response.data);
     throw new GoogleHttpError(response.status, responseBody);
-}
-
-async function listModels(request?: { signal?: AbortSignal; }): Promise<ListModelsResult> {
-    const apiKey = getGoogleApiKey();
-    if (request?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-
-    const requestIdBase = createNativeRequestId("google-models");
-    const unbindAbort = bindAbortToNativeRequest(request?.signal, requestIdBase);
-
-    const seenModelIds = new Set<string>();
-    const models: ImproveTextModel[] = [];
-    let nextPageToken: string | null = null;
-
-    try {
-        do {
-            if (request?.signal?.aborted) {
-                throw new DOMException("Aborted", "AbortError");
-            }
-
-            const pageRequestId = `${requestIdBase}:${nextPageToken ?? "first"}`;
-            const unbindPageAbort = bindAbortToNativeRequest(request?.signal, pageRequestId);
-            let response: string;
-
-            try {
-                response = await fetchGoogle(Native.listGoogleModels(pageRequestId, apiKey, nextPageToken ?? undefined));
-            } finally {
-                unbindPageAbort?.();
-            }
-
-            const body = await parseJsonSafe(response) as GoogleListModelsResponse;
-            const rawModels = Array.isArray(body.models) ? body.models : [];
-
-            for (const rawModel of rawModels) {
-                const model = normalizeModel(rawModel as GoogleModel);
-                if (!model || seenModelIds.has(model.id)) continue;
-
-                seenModelIds.add(model.id);
-                models.push(model);
-            }
-
-            nextPageToken = typeof body.nextPageToken === "string" && body.nextPageToken.trim()
-                ? body.nextPageToken
-                : null;
-        } while (nextPageToken);
-
-        return {
-            providerId: "google",
-            models,
-        };
-    } finally {
-        unbindAbort?.();
-    }
 }
 
 async function improveText(request: ImproveTextRequest): Promise<ImproveTextResponse> {
@@ -375,7 +285,6 @@ function mapError(error: unknown): ImproveTextProviderError {
 
 export const googleProviderAdapter: ProviderAdapter = {
     id: "google",
-    listModels,
     improveText,
     mapError,
 };

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import type { ImproveTextProviderId,ProviderAdapter } from "../types";
+import type { ImproveTextProviderId, ProviderAdapter } from "../types";
 import { anthropicProviderAdapter } from "./anthropic";
 import { googleProviderAdapter } from "./google";
 import { openAiProviderAdapter } from "./openai";
@@ -14,8 +14,6 @@ export const providerAdapters: Record<ImproveTextProviderId, ProviderAdapter> = 
     anthropic: anthropicProviderAdapter,
     google: googleProviderAdapter,
 };
-
-export const providers = Object.values(providerAdapters);
 
 export {
     anthropicProviderAdapter,

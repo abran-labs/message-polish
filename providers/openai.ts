@@ -8,11 +8,9 @@ import type { PluginNative } from "@utils/types";
 
 import { settings } from "../settings";
 import type {
-    ImproveTextModel,
     ImproveTextProviderError,
     ImproveTextRequest,
     ImproveTextResponse,
-    ListModelsResult,
     ProviderAdapter,
 } from "../types";
 
@@ -52,14 +50,6 @@ class OpenAiConfigurationError extends Error {
     }
 }
 
-type OpenAiModel = {
-    id?: unknown;
-};
-
-type OpenAiModelsApiResponse = {
-    data?: unknown;
-};
-
 type OpenAiResponsesApiResponse = {
     output_text?: unknown;
     output?: unknown;
@@ -80,15 +70,6 @@ async function parseJsonSafe(data: string): Promise<unknown> {
     } catch {
         return null;
     }
-}
-
-function normalizeModel(item: OpenAiModel): ImproveTextModel | null {
-    if (typeof item.id !== "string" || !item.id.trim()) return null;
-
-    return {
-        id: item.id,
-        label: item.id,
-    };
 }
 
 function extractOutputText(responseBody: OpenAiResponsesApiResponse): string {
@@ -158,32 +139,6 @@ async function fetchOpenAi(dataPromise: Promise<{ status: number; data: string; 
 
     const responseBody = await parseJsonSafe(response.data);
     throw new OpenAiHttpError(response.status, responseBody);
-}
-
-async function listModels(request?: { signal?: AbortSignal; }): Promise<ListModelsResult> {
-    const apiKey = getOpenAiApiKey();
-    if (request?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-
-    const requestId = createNativeRequestId("openai-models");
-    const unbindAbort = bindAbortToNativeRequest(request?.signal, requestId);
-
-    try {
-        const response = await fetchOpenAi(Native.listOpenAiModels(requestId, apiKey));
-
-        const body = await parseJsonSafe(response) as OpenAiModelsApiResponse;
-        const rawModels = Array.isArray(body.data) ? body.data : [];
-
-        const models = rawModels
-            .map(model => normalizeModel(model as OpenAiModel))
-            .filter((model): model is ImproveTextModel => model !== null);
-
-        return {
-            providerId: "openai",
-            models,
-        };
-    } finally {
-        unbindAbort?.();
-    }
 }
 
 async function improveText(request: ImproveTextRequest): Promise<ImproveTextResponse> {
@@ -287,7 +242,6 @@ function mapError(error: unknown): ImproveTextProviderError {
 
 export const openAiProviderAdapter: ProviderAdapter = {
     id: "openai",
-    listModels,
     improveText,
     mapError,
 };
