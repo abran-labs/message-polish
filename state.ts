@@ -11,6 +11,10 @@ export interface DraftController {
     replaceDraft(channelId: string, value: string): void;
 }
 
+function logDraftDebug(event: string, data: Record<string, unknown>): void {
+    console.debug(`[ai-improve-text] ${event}`, data);
+}
+
 interface ChannelAbortState {
     controller: AbortController;
     token: number;
@@ -157,6 +161,11 @@ export function clearOriginalDraftSnapshot(channelId: string): void {
 }
 
 export function replaceCurrentDraft(channelId: string, value: string): void {
+    logDraftDebug("replaceCurrentDraft:before", {
+        channelId,
+        previousDraft: draftController.getDraft(channelId),
+        nextDraft: value,
+    });
     draftController.replaceDraft(channelId, value);
     let managedValues = managedDraftValuesByChannel.get(channelId);
     if (!managedValues) {
@@ -165,6 +174,11 @@ export function replaceCurrentDraft(channelId: string, value: string): void {
     }
 
     managedValues.add(value);
+    logDraftDebug("replaceCurrentDraft:after", {
+        channelId,
+        liveDraft: draftController.getDraft(channelId),
+        managedValues: Array.from(managedValues),
+    });
 }
 
 export function clearManagedDraftTracking(channelId: string): void {
@@ -208,6 +222,11 @@ export function beginDraftReplacement(channelId: string, placeholder: string): s
 
 export function commitDraftReplacement(channelId: string, improvedText: string): boolean {
     if (hasManagedDraftConflict(channelId)) {
+        logDraftDebug("commitDraftReplacement:blocked", {
+            channelId,
+            improvedText,
+            liveDraft: draftController.getDraft(channelId),
+        });
         originalDraftByChannel.delete(channelId);
         clearManagedDraftTracking(channelId);
         return false;
@@ -216,6 +235,11 @@ export function commitDraftReplacement(channelId: string, improvedText: string):
     replaceCurrentDraft(channelId, improvedText);
     originalDraftByChannel.delete(channelId);
     clearManagedDraftTracking(channelId);
+    logDraftDebug("commitDraftReplacement:applied", {
+        channelId,
+        improvedText,
+        liveDraft: draftController.getDraft(channelId),
+    });
     return true;
 }
 
@@ -314,9 +338,17 @@ export function startLoadingPlaceholderLoop(channelId: string): void {
 
     let step = 0;
     beginDraftReplacement(channelId, getLoadingPlaceholderText(step));
+    logDraftDebug("startLoadingPlaceholderLoop", {
+        channelId,
+        initialPlaceholder: getLoadingPlaceholderText(step),
+    });
 
     const interval = setInterval(() => {
         if (hasManagedDraftConflict(channelId)) {
+            logDraftDebug("startLoadingPlaceholderLoop:conflict-stop", {
+                channelId,
+                liveDraft: draftController.getDraft(channelId),
+            });
             stopLoadingPlaceholderLoop(channelId);
             return;
         }
@@ -334,6 +366,10 @@ export function stopLoadingPlaceholderLoop(channelId: string): boolean {
 
     clearInterval(interval);
     loadingPlaceholderIntervalByChannel.delete(channelId);
+    logDraftDebug("stopLoadingPlaceholderLoop", {
+        channelId,
+        liveDraft: draftController.getDraft(channelId),
+    });
     return true;
 }
 
