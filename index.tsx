@@ -34,7 +34,6 @@ const DraftManager = findByPropsLazy("clearDraft", "saveDraft") as {
 const Transforms = findByPropsLazy("insertNodes", "textToText") as {
     delete(editor: object, options: object): void;
     insertText(editor: object, text: string): void;
-    textToText?(text: string): unknown;
 };
 const Editor = findByPropsLazy("start", "end", "toSlateRange") as {
     start(editor: object, path: never[]): object;
@@ -75,8 +74,6 @@ function replaceVisibleComposerText(channelId: string, value: string): boolean {
     });
 
     if (typeof composerProps?.onChange === "function") {
-        const richValueFromText = Transforms.textToText?.(value);
-
         logDraftDebug("replaceVisibleComposerText:onChange", {
             channelId,
             value,
@@ -88,32 +85,30 @@ function replaceVisibleComposerText(channelId: string, value: string): boolean {
                 : composerProps.richValue,
         });
 
-        if (richValueFromText != null) {
-            try {
-                composerProps.onChange(richValueFromText, value, composerProps.channel);
+        try {
+            composerProps.onChange(composerProps.richValue, value, composerProps.channel);
 
-                const liveDraft = getDraft(channelId);
-                if (liveDraft === value) {
-                    logDraftDebug("replaceVisibleComposerText:onChange-success", {
-                        channelId,
-                        candidate: "rich-textValue-channel",
-                    });
-                    return true;
-                }
-
-                logDraftDebug("replaceVisibleComposerText:onChange-mismatch", {
+            const liveDraft = getDraft(channelId);
+            if (liveDraft === value) {
+                logDraftDebug("replaceVisibleComposerText:onChange-success", {
                     channelId,
-                    candidate: "rich-textValue-channel",
-                    liveDraft,
+                    candidate: "existing-richValue-textValue-channel",
                 });
-            } catch (error) {
-                logDraftDebug("replaceVisibleComposerText:onChange-error", {
-                    channelId,
-                    candidate: "rich-textValue-channel",
-                    message: error instanceof Error ? error.message : String(error),
-                    stack: error instanceof Error ? error.stack : null,
-                });
+                return true;
             }
+
+            logDraftDebug("replaceVisibleComposerText:onChange-mismatch", {
+                channelId,
+                candidate: "existing-richValue-textValue-channel",
+                liveDraft,
+            });
+        } catch (error) {
+            logDraftDebug("replaceVisibleComposerText:onChange-error", {
+                channelId,
+                candidate: "existing-richValue-textValue-channel",
+                message: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : null,
+            });
         }
     }
 
