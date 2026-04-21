@@ -108,6 +108,18 @@ function captureAndForwardEditorRef(originalSetEditorRef: ((ref: any) => void) |
     };
 }
 
+function inspectComposerProps(props: any): null {
+    console.warn("[ai-improve-text] composer-props", {
+        topLevelKeys: props ? Object.keys(props).slice(0, 50) : null,
+        hasSetEditorRef: Boolean(props?.setEditorRef),
+        hasEditorRef: Boolean(props?.editorRef),
+        channelId: props?.channel?.id ?? props?.channelId ?? null,
+        type: props?.type ?? null,
+    });
+
+    return null;
+}
+
 function getConfiguredProviderId(): ImproveTextProviderId | null {
     const selectedProvider = settings.store.provider;
     if (selectedProvider === "openai" || selectedProvider === "anthropic" || selectedProvider === "google") {
@@ -254,12 +266,16 @@ export default definePlugin({
     settings,
     patches: [{
         find: ".CREATE_FORUM_POST||",
-        replacement: {
+        replacement: [{
+            match: /(?<=textValue:(\i),editorHeight:\i,channelId:\i\.id\}\)),\i/,
+            replace: ",$self.inspectComposerProps(arguments[0])"
+        }, {
             match: /setEditorRef:(\i)(?=,textValue:\i,editorHeight:\i,channelId:(\i)\.id)/,
             replace: "setEditorRef:$self.captureAndForwardEditorRef($1,$2.id)"
-        }
+        }]
     }],
 
+    inspectComposerProps,
     captureAndForwardEditorRef,
 
     start() {
