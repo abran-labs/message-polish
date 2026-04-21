@@ -209,6 +209,7 @@ export function commitDraftReplacement(channelId: string, improvedText: string):
 
     replaceCurrentDraft(channelId, improvedText);
     originalDraftByChannel.delete(channelId);
+    clearManagedDraftTracking(channelId);
     return true;
 }
 

@@ -17,10 +17,24 @@ interface NativeRequestResult {
 }
 
 const controllerByRequestId = new Map<string, AbortController>();
+const cancelledRequestIds = new Set<string>();
 
 async function performRequest(requestId: string, url: string, init: RequestInit): Promise<NativeRequestResult> {
+    if (cancelledRequestIds.has(requestId)) {
+        cancelledRequestIds.delete(requestId);
+        return {
+            status: -1,
+            data: "AbortError: request cancelled",
+        };
+    }
+
     const controller = new AbortController();
     controllerByRequestId.set(requestId, controller);
+
+    if (cancelledRequestIds.has(requestId)) {
+        cancelledRequestIds.delete(requestId);
+        controller.abort("cancelled");
+    }
 
     try {
         const response = await fetch(url, {
@@ -54,10 +68,14 @@ function withGoogleApiKey(url: string, apiKey: string, pageToken?: string): stri
 
 export function cancelNativeRequest(_: IpcMainInvokeEvent, requestId: string): boolean {
     const controller = controllerByRequestId.get(requestId);
-    if (!controller) return false;
+    if (!controller) {
+        cancelledRequestIds.add(requestId);
+        return false;
+    }
 
     controller.abort("cancelled");
     controllerByRequestId.delete(requestId);
+    cancelledRequestIds.delete(requestId);
     return true;
 }
 

@@ -26,12 +26,12 @@ function bindAbortToNativeRequest(signal: AbortSignal | undefined, requestId: st
     if (!signal) return null;
 
     const cancel = () => void Native.cancelNativeRequest(requestId);
+    signal.addEventListener("abort", cancel, { once: true });
+
     if (signal.aborted) {
         cancel();
-        return null;
     }
 
-    signal.addEventListener("abort", cancel, { once: true });
     return () => signal.removeEventListener("abort", cancel);
 }
 

@@ -59,11 +59,11 @@ function ModelSelectorSetting(props: { setValue(newValue: string): void; }) {
             }
         }));
 
-        let aborted = false;
+        const controller = new AbortController();
 
-        void providerAdapters[selectedProvider].listModels()
+        void providerAdapters[selectedProvider].listModels({ signal: controller.signal })
             .then(({ models }) => {
-                if (aborted) return;
+                if (controller.signal.aborted) return;
 
                 setStateByProvider(prev => ({
                     ...prev,
@@ -75,7 +75,7 @@ function ModelSelectorSetting(props: { setValue(newValue: string): void; }) {
                 }));
             })
             .catch(error => {
-                if (aborted) return;
+                if (controller.signal.aborted) return;
 
                 const message = error instanceof Error
                     ? error.message
@@ -92,7 +92,7 @@ function ModelSelectorSetting(props: { setValue(newValue: string): void; }) {
             });
 
         return () => {
-            aborted = true;
+            controller.abort();
         };
     }, [selectedProvider]);
 
