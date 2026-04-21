@@ -5,8 +5,11 @@
  */
 
 import { ChatBarButton, ChatBarButtonFactory } from "@api/ChatButtons";
+import { Button } from "@components/Button";
+import { copyWithToast, sendMessage } from "@utils/discord";
+import { closeModal, ModalCloseButton, ModalContent, ModalFooter, ModalHeader, ModalRoot, ModalSize, openModal } from "@utils/modal";
 import definePlugin, { IconComponent } from "@utils/types";
-import { DraftStore, DraftType, showToast, Toasts, useStateFromStores } from "@webpack/common";
+import { DraftStore, DraftType, Forms, TextArea, Toasts, useState, useStateFromStores } from "@webpack/common";
 
 import { providerAdapters } from "./providers";
 import { settings } from "./settings";
@@ -35,7 +38,11 @@ const ImproveTextIcon: IconComponent = ({ height = 20, width = 20, className }) 
 const getDraft = (channelId: string) => DraftStore.getDraft(channelId, DraftType.ChannelMessage);
 
 function notify(message: string, type: ToastType = Toasts.Type.SUCCESS): void {
-    showToast(message, type);
+    Toasts.show({
+        message,
+        id: Toasts.genId(),
+        type,
+    });
 }
 
 function getConfiguredProviderId(): ImproveTextProviderId | null {
@@ -91,12 +98,68 @@ function toggleArmedChannel(channelId: string): void {
 
     if (armedChannels.has(channelId)) {
         armedChannels.delete(channelId);
-        notify("AI improve cancelled for the next send.");
+        notify("AI review cancelled for the next send.");
         return;
     }
 
     armedChannels.add(channelId);
-    notify("AI improve armed for your next send.");
+    notify("AI review armed for your next send.");
+}
+
+function openImproveReviewModal(options: {
+    channelId: string;
+    improvedText: string;
+    onSendImproved(editedText: string): void;
+}): string {
+    const key = openModal(modalProps => {
+        const [editedText, setEditedText] = useState(options.improvedText);
+
+        return (
+            <ModalRoot {...modalProps} size={ModalSize.MEDIUM}>
+                <ModalHeader>
+                    <Forms.FormTitle tag="h2" style={{ flexGrow: 1 }}>Review AI improved message</Forms.FormTitle>
+                    <ModalCloseButton onClick={() => closeModal(key)} />
+                </ModalHeader>
+
+                <ModalContent>
+                    <Forms.FormText style={{ marginBottom: 12 }}>
+                        Review and edit the improved message before sending it.
+                    </Forms.FormText>
+                    <TextArea value={editedText} onChange={setEditedText} />
+                </ModalContent>
+
+                <ModalFooter>
+                    <div style={{ display: "flex", gap: 8, width: "100%", justifyContent: "flex-end" }}>
+                        <Button
+                            variant="secondary"
+                            onClick={async () => {
+                                await copyWithToast(editedText, "Improved message copied to clipboard.");
+                            }}
+                        >
+                            Copy improved
+                        </Button>
+                        <Button
+                            variant="secondary"
+                            onClick={() => closeModal(key)}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            onClick={() => {
+                                options.onSendImproved(editedText);
+                                closeModal(key);
+                            }}
+                            disabled={!editedText.trim()}
+                        >
+                            Send improved
+                        </Button>
+                    </div>
+                </ModalFooter>
+            </ModalRoot>
+        );
+    });
+
+    return key;
 }
 
 export function shouldShowImproveTextButton(options: {
@@ -120,7 +183,7 @@ const ImproveTextButton: ChatBarButtonFactory = ({ isAnyChat, channel: { id: cha
 
     return (
         <ChatBarButton
-            tooltip={armed ? "AI improve armed for next send" : "Improve next send with AI"}
+            tooltip={armed ? "AI review armed for next send" : "Review next send with AI"}
             onClick={() => toggleArmedChannel(channelId)}
         >
             <span style={{ color: armed ? "var(--brand-500)" : undefined, display: "inline-flex" }}>
@@ -132,12 +195,12 @@ const ImproveTextButton: ChatBarButtonFactory = ({ isAnyChat, channel: { id: cha
 
 export default definePlugin({
     name: "AiImproveText",
-    description: "Improve your next sent message with AI.",
+    description: "Review an AI-improved version of your next message before sending.",
     authors: [{ name: "Sisyphus", id: 0n }],
     dependencies: ["ChatInputButtonAPI"],
     settings,
 
-    async onBeforeMessageSend(channelId, messageObj) {
+    async onBeforeMessageSend(channelId, messageObj, options) {
         if (!armedChannels.has(channelId)) return;
         armedChannels.delete(channelId);
 
@@ -156,7 +219,7 @@ export default definePlugin({
         if (!input) return;
 
         inFlightChannels.add(channelId);
-        notify("Improving message before send...");
+        notify("Improving message for review...");
 
         const timeoutSignal = AbortSignal.timeout(20_000);
 
@@ -176,8 +239,29 @@ export default definePlugin({
                 return { cancel: true };
             }
 
-            messageObj.content = response.output;
-            notify("Message improved with AI.");
+            openImproveReviewModal({
+                channelId,
+                improvedText: response.output,
+                onSendImproved: editedText => {
+                    void sendMessage(channelId, {
+                        content: editedText,
+                        tts: messageObj.tts,
+                        validNonShortcutEmojis: messageObj.validNonShortcutEmojis,
+                        invalidEmojis: messageObj.invalidEmojis,
+                    }, true, {
+                        stickerIds: options.stickers,
+                        attachmentsToUpload: options.uploads,
+                        allowedMentions: options.replyOptions.allowedMentions && {
+                            parse: options.replyOptions.allowedMentions.parse,
+                            replied_user: options.replyOptions.allowedMentions.repliedUser,
+                        },
+                        messageReference: options.replyOptions.messageReference,
+                    });
+                    notify("Improved message sent.");
+                }
+            });
+
+            return { cancel: true };
         } catch (error) {
             const providerError = providerAdapter.mapError(error);
             notify(providerError.message, Toasts.Type.FAILURE);
