@@ -15,8 +15,54 @@ export const settings = definePluginSettings({
         restartNeeded: true,
     },
     provider: {
+        type: OptionType.SELECT,
+        description: "AI provider used for text improvement",
+        options: [
+            { label: "OpenAI", value: "openai", default: true },
+            { label: "Anthropic", value: "anthropic" },
+            { label: "Google", value: "google" }
+        ] as const,
+    },
+    stylePreset: {
+        type: OptionType.SELECT,
+        description: "Writing style preset for improved text",
+        options: [
+            { label: "Professional", value: "professional", default: true },
+            { label: "Business", value: "business" },
+            { label: "Casual", value: "casual" },
+            { label: "Concise", value: "concise" },
+            { label: "Explain", value: "explain" }
+        ] as const,
+    },
+    openAiApiKey: {
         type: OptionType.STRING,
-        description: "Provider id used for text improvement",
-        default: "noop",
+        description: "OpenAI API key",
+        default: "",
+        placeholder: "sk-...",
+        componentProps: {
+            type: "password"
+        },
+    },
+    anthropicApiKey: {
+        type: OptionType.STRING,
+        description: "Anthropic API key",
+        default: "",
+        placeholder: "sk-ant-...",
+        componentProps: {
+            type: "password"
+        },
+    },
+    googleApiKey: {
+        type: OptionType.STRING,
+        description: "Google API key",
+        default: "",
+        placeholder: "AIza...",
+        componentProps: {
+            type: "password"
+        },
     }
-});
+}).withPrivateSettings<{
+    openAiApiKey?: string;
+    anthropicApiKey?: string;
+    googleApiKey?: string;
+}>();
