@@ -161,7 +161,7 @@ function ModelSelectorSetting(props: { setValue(newValue: string): void; }) {
 export const settings = definePluginSettings({
     showChatBarButton: {
         type: OptionType.BOOLEAN,
-        description: "Show the Improve Text chat bar button",
+        description: "Show the AI message polish button. Right-click the button to cycle styles quickly.",
         default: true,
         restartNeeded: true,
     },
@@ -184,7 +184,7 @@ export const settings = definePluginSettings({
     },
     stylePreset: {
         type: OptionType.SELECT,
-        description: "Writing style preset for improved text",
+        description: "Default writing style preset for improved text. Channels use this until you right-click the button to pick a channel-specific style.",
         options: [
             { label: "Professional", value: "professional", default: true },
             { label: "Business", value: "business" },

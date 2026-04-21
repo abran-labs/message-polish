@@ -25,10 +25,18 @@ const ImproveTextIcon: IconComponent = ({ height = 20, width = 20, className }) 
             width={width}
             height={height}
             className={className}
-            viewBox="0 0 24 24"
-            style={{ scale: "1.1" }}
+            viewBox="0 0 2406 2406"
         >
-            <path d="M4 3h10a1 1 0 1 1 0 2H9.41l4.3 4.3a1 1 0 0 1-1.42 1.4L8 6.42V11a1 1 0 1 1-2 0V4a1 1 0 0 1 1-1Zm7 10h9a1 1 0 1 1 0 2h-3.59l1.3 1.3a1 1 0 0 1-1.42 1.4L15 16.41V20a1 1 0 1 1-2 0v-6a1 1 0 0 1 1-1Zm-7 3a1 1 0 0 1 1 1v2h2a1 1 0 1 1 0 2H4a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1Z" />
+            <path
+                id="vc-ai-polish-icon"
+                fill="currentColor"
+                d="M1107.3 299.1c-197.999 0-373.9 127.3-435.2 315.3L650 743.5v427.9c0 21.4 11 40.4 29.4 51.4l344.5 198.515V833.3h.1v-27.9L1372.7 604c33.715-19.52 70.44-32.857 108.47-39.828L1447.6 450.3C1361 353.5 1237.1 298.5 1107.3 299.1zm0 117.5-.6.6c79.699 0 156.3 27.5 217.6 78.4-2.5 1.2-7.4 4.3-11 6.1L952.8 709.3c-18.4 10.4-29.4 30-29.4 51.4V1248l-155.1-89.4V755.8c-.1-187.099 151.601-338.9 339-339.2z"
+            />
+            <use href="#vc-ai-polish-icon" transform="rotate(60 1203 1203)" />
+            <use href="#vc-ai-polish-icon" transform="rotate(120 1203 1203)" />
+            <use href="#vc-ai-polish-icon" transform="rotate(180 1203 1203)" />
+            <use href="#vc-ai-polish-icon" transform="rotate(240 1203 1203)" />
+            <use href="#vc-ai-polish-icon" transform="rotate(300 1203 1203)" />
         </svg>
     );
 };
@@ -111,7 +119,6 @@ function cycleStylePreset(channelId: string): void {
     const currentIndex = STYLE_ORDER.indexOf(currentStyle);
     const nextStyle = STYLE_ORDER[(currentIndex + 1) % STYLE_ORDER.length];
     setEffectiveStylePreset(channelId, nextStyle);
-    notify(`AI style set to ${nextStyle}.`);
 }
 
 async function improveAndCopyDraft(channelId: string): Promise<void> {
@@ -176,7 +183,7 @@ const ImproveTextButton: ChatBarButtonFactory = ({ isAnyChat, channel: { id: cha
 
     return (
         <ChatBarButton
-            tooltip={`Improve with AI and copy result (${stylePreset}). Right-click to change style.`}
+            tooltip={`Improve with AI (${stylePreset})`}
             onClick={() => {
                 void improveAndCopyDraft(channelId);
             }}
@@ -191,8 +198,8 @@ const ImproveTextButton: ChatBarButtonFactory = ({ isAnyChat, channel: { id: cha
 };
 
 export default definePlugin({
-    name: "AiImproveText",
-    description: "Improve the current draft with AI and copy the result to your clipboard.",
+    name: "MessagePolish",
+    description: "Improve your current messages with AI.",
     authors: [{ name: "Sisyphus", id: 0n }],
     dependencies: ["ChatInputButtonAPI"],
     settings,
