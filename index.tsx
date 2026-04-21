@@ -109,6 +109,10 @@ function captureAndForwardEditorRef(originalSetEditorRef: ((ref: any) => void) |
 }
 
 function inspectComposerProps(props: any): null {
+    if (props?.setEditorRef && props?.channel?.id) {
+        props.setEditorRef = captureAndForwardEditorRef(props.setEditorRef, props.channel.id);
+    }
+
     console.warn("[ai-improve-text] composer-props", {
         topLevelKeys: props ? Object.keys(props).slice(0, 50) : null,
         hasSetEditorRef: Boolean(props?.setEditorRef),
@@ -266,13 +270,10 @@ export default definePlugin({
     settings,
     patches: [{
         find: ".CREATE_FORUM_POST||",
-        replacement: [{
+        replacement: {
             match: /(?<=textValue:(\i),editorHeight:\i,channelId:\i\.id\}\)),\i/,
             replace: ",$self.inspectComposerProps(arguments[0])"
-        }, {
-            match: /setEditorRef:(\i)(?=,textValue:\i,editorHeight:\i,channelId:(\i)\.id)/,
-            replace: "setEditorRef:$self.captureAndForwardEditorRef($1,$2.id)"
-        }]
+        }
     }],
 
     inspectComposerProps,
