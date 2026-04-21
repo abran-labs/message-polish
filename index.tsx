@@ -40,6 +40,7 @@ const Editor = findByPropsLazy("start", "end", "toSlateRange") as {
     end(editor: object, path: never[]): object;
 };
 const activeEditorRefByChannel = new Map<string, any>();
+const latestComposerPropsByChannel = new Map<string, any>();
 
 const ImproveTextIcon: IconComponent = ({ height = 20, width = 20, className }) => {
     return (
@@ -109,6 +110,11 @@ function captureAndForwardEditorRef(originalSetEditorRef: ((ref: any) => void) |
 }
 
 function inspectComposerProps(props: any): null {
+    const channelId = props?.channel?.id ?? props?.channelId ?? null;
+    if (channelId) {
+        latestComposerPropsByChannel.set(channelId, props);
+    }
+
     if (props?.setEditorRef && props?.channel?.id) {
         props.setEditorRef = captureAndForwardEditorRef(props.setEditorRef, props.channel.id);
     }
@@ -117,7 +123,9 @@ function inspectComposerProps(props: any): null {
         topLevelKeys: props ? Object.keys(props).slice(0, 50) : null,
         hasSetEditorRef: Boolean(props?.setEditorRef),
         hasEditorRef: Boolean(props?.editorRef),
-        channelId: props?.channel?.id ?? props?.channelId ?? null,
+        hasOnChange: typeof props?.onChange === "function",
+        onChangeLength: typeof props?.onChange === "function" ? props.onChange.length : null,
+        channelId,
         type: props?.type ?? null,
     });
 
