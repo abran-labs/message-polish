@@ -44,6 +44,11 @@ const originalDraftByChannel = new Map<string, string>();
 const inFlightChannels = new Set<string>();
 const abortStateByChannel = new Map<string, ChannelAbortState>();
 const tokenCounterByChannel = new Map<string, number>();
+const loadingPlaceholderIntervalByChannel = new Map<string, ReturnType<typeof setInterval>>();
+
+export const LOADING_PLACEHOLDER_BASE_TEXT = "AI is improving text";
+const LOADING_PLACEHOLDER_SUFFIXES = [".", "..", "..."] as const;
+const LOADING_PLACEHOLDER_INTERVAL_MS = 600;
 
 export function getState(): ImproveTextState {
     return state;
@@ -62,6 +67,7 @@ export function patchState(patch: Partial<ImproveTextState>): void {
 
 export function resetState(): void {
     state = { ...DEFAULT_STATE };
+    stopAllLoadingPlaceholderLoops();
 }
 
 export function setDraftController(controller: DraftController | null): void {
@@ -181,4 +187,57 @@ export function clearChannelAbortToken(channelId: string, token?: number): boole
     if (token != null && existing.token !== token) return false;
     abortStateByChannel.delete(channelId);
     return true;
+}
+
+export function getLoadingPlaceholderText(step: number): string {
+    const suffix = LOADING_PLACEHOLDER_SUFFIXES[step % LOADING_PLACEHOLDER_SUFFIXES.length];
+    return `${LOADING_PLACEHOLDER_BASE_TEXT}${suffix}`;
+}
+
+export function isLoadingPlaceholderActive(channelId: string): boolean {
+    return loadingPlaceholderIntervalByChannel.has(channelId);
+}
+
+export function startLoadingPlaceholderLoop(channelId: string): void {
+    stopLoadingPlaceholderLoop(channelId);
+
+    let step = 0;
+    beginDraftReplacement(channelId, getLoadingPlaceholderText(step));
+
+    const interval = setInterval(() => {
+        step += 1;
+        replaceCurrentDraft(channelId, getLoadingPlaceholderText(step));
+    }, LOADING_PLACEHOLDER_INTERVAL_MS);
+
+    loadingPlaceholderIntervalByChannel.set(channelId, interval);
+}
+
+export function stopLoadingPlaceholderLoop(channelId: string): boolean {
+    const interval = loadingPlaceholderIntervalByChannel.get(channelId);
+    if (interval == null) return false;
+
+    clearInterval(interval);
+    loadingPlaceholderIntervalByChannel.delete(channelId);
+    return true;
+}
+
+export function stopAllLoadingPlaceholderLoops(): void {
+    for (const interval of loadingPlaceholderIntervalByChannel.values()) {
+        clearInterval(interval);
+    }
+
+    loadingPlaceholderIntervalByChannel.clear();
+}
+
+export async function runWithLoadingPlaceholderLoop<T>(
+    channelId: string,
+    run: () => Promise<T> | T,
+): Promise<T> {
+    startLoadingPlaceholderLoop(channelId);
+
+    try {
+        return await run();
+    } finally {
+        stopLoadingPlaceholderLoop(channelId);
+    }
 }
