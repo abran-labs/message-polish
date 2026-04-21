@@ -64,6 +64,25 @@ function logDraftDebug(event: string, data: Record<string, unknown>): void {
 }
 
 function replaceVisibleComposerText(channelId: string, value: string): boolean {
+    const composerProps = latestComposerPropsByChannel.get(channelId);
+    if (typeof composerProps?.onChange === "function") {
+        logDraftDebug("replaceVisibleComposerText:onChange", {
+            channelId,
+            value,
+            onChangeLength: composerProps.onChange.length,
+        });
+
+        try {
+            composerProps.onChange(value, composerProps.richValue, composerProps.channel);
+            return true;
+        } catch (error) {
+            logDraftDebug("replaceVisibleComposerText:onChange-error", {
+                channelId,
+                message: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+
     const editorRef = activeEditorRefByChannel.get(channelId);
     const slateEditor = editorRef?.ref?.current?.getSlateEditor?.();
     if (!slateEditor) {
