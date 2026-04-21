@@ -70,6 +70,11 @@ function replaceVisibleComposerText(channelId: string, value: string): boolean {
             channelId,
             value,
             onChangeLength: composerProps.onChange.length,
+            textValueType: typeof composerProps.textValue,
+            richValueIsArray: Array.isArray(composerProps.richValue),
+            richValuePreview: Array.isArray(composerProps.richValue)
+                ? composerProps.richValue.slice(0, 2)
+                : composerProps.richValue,
         });
 
         try {
@@ -79,6 +84,7 @@ function replaceVisibleComposerText(channelId: string, value: string): boolean {
             logDraftDebug("replaceVisibleComposerText:onChange-error", {
                 channelId,
                 message: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : null,
             });
         }
     }
@@ -144,6 +150,8 @@ function inspectComposerProps(props: any): null {
         hasEditorRef: Boolean(props?.editorRef),
         hasOnChange: typeof props?.onChange === "function",
         onChangeLength: typeof props?.onChange === "function" ? props.onChange.length : null,
+        textValueType: typeof props?.textValue,
+        richValueIsArray: Array.isArray(props?.richValue),
         channelId,
         type: props?.type ?? null,
     });
