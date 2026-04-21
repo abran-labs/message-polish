@@ -50,6 +50,13 @@ class OpenAiConfigurationError extends Error {
     }
 }
 
+class OpenAiNativeTransportError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = "OpenAiNativeTransportError";
+    }
+}
+
 type OpenAiResponsesApiResponse = {
     output_text?: unknown;
     output?: unknown;
@@ -116,7 +123,10 @@ function isAbortError(error: unknown): boolean {
 
 function isNetworkError(error: unknown): boolean {
     if (!(error instanceof Error)) return false;
-    if (error.name === "TypeError") return true;
+    if (error instanceof OpenAiNativeTransportError) return true;
+    if (error.name === "TypeError") {
+        return /network|failed to fetch|load failed|fetch/i.test(error.message);
+    }
 
     return /network|failed to fetch|load failed|fetch/i.test(error.message);
 }
@@ -134,7 +144,7 @@ async function fetchOpenAi(dataPromise: Promise<{ status: number; data: string; 
             throw new DOMException("Aborted", "AbortError");
         }
 
-        throw new TypeError(response.data);
+        throw new OpenAiNativeTransportError(response.data);
     }
 
     const responseBody = await parseJsonSafe(response.data);
@@ -210,6 +220,22 @@ function mapError(error: unknown): ImproveTextProviderError {
             };
         }
 
+        if (error.status === 400 || error.status === 404) {
+            const detail = typeof error.responseBody === "object" && error.responseBody !== null && "error" in error.responseBody
+                ? JSON.stringify((error.responseBody as { error?: unknown; }).error)
+                : null;
+
+            return {
+                providerId: "openai",
+                code: "invalid_request",
+                message: detail
+                    ? `OpenAI rejected the request: ${detail}`
+                    : `OpenAI rejected the request with status ${error.status}. Check the model ID and request configuration.`,
+                retryable: false,
+                cause: error,
+            };
+        }
+
         const isServerError = error.status >= 500;
 
         return {
@@ -222,10 +248,14 @@ function mapError(error: unknown): ImproveTextProviderError {
     }
 
     if (isNetworkError(error)) {
+        const detail = error instanceof Error && error.message.trim()
+            ? ` ${error.message.trim()}`
+            : "";
+
         return {
             providerId: "openai",
             code: "network_error",
-            message: "Network error while contacting OpenAI.",
+            message: `Network error while contacting OpenAI.${detail}`,
             retryable: true,
             cause: error,
         };

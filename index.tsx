@@ -175,7 +175,7 @@ export function shouldShowImproveTextButton(options: {
 }
 
 const ImproveTextButton: ChatBarButtonFactory = ({ isAnyChat, channel: { id: channelId } }) => {
-    const { showChatBarButton } = settings.use(["showChatBarButton"]);
+    const { showChatBarButton } = settings.use(["showChatBarButton", "stylePreset", "channelStyleMemory"]);
     const draft = useStateFromStores([DraftStore], () => getDraft(channelId));
     const stylePreset = getEffectiveStylePreset(channelId);
 
