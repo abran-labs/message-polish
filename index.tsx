@@ -23,7 +23,6 @@ import {
     resolveChannelStylePreset,
     rollbackDraftReplacement,
     runWithChannelInFlight,
-    runWithLoadingPlaceholderLoop,
     setDraftController,
 } from "./state";
 import type { ImproveTextProviderId } from "./types";
@@ -276,13 +275,13 @@ export async function improveDraft(channelId: string): Promise<void> {
             const abortToken = allocateChannelAbortToken(channelId);
 
             try {
-                const response = await runWithLoadingPlaceholderLoop(channelId, () => providerAdapter.improveText({
+                const response = await providerAdapter.improveText({
                     providerId,
                     model,
                     input: prompt,
                     stylePreset,
                     signal: abortToken.signal,
-                }));
+                });
 
                 if (!isCurrentChannelAbortToken(channelId, abortToken.token)) return;
                 if (!commitDraftReplacement(channelId, response.output)) {
