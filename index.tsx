@@ -59,6 +59,13 @@ const ImproveTextIcon: IconComponent = ({ height = 20, width = 20, className }) 
 
 const getDraft = (channelId: string) => DraftStore.getDraft(channelId, DraftType.ChannelMessage);
 
+function getLiveComposerText(channelId: string): string | null {
+    const composerProps = latestComposerPropsByChannel.get(channelId);
+    return typeof composerProps?.textValue === "string"
+        ? composerProps.textValue
+        : null;
+}
+
 function logDraftDebug(event: string, data: Record<string, unknown>): void {
     console.warn(`[ai-improve-text] ${event}`, data);
 }
@@ -360,7 +367,9 @@ export default definePlugin({
     start() {
         setDraftController({
             getDraft(channelId) {
-                return getDraft(channelId) ?? "";
+                return getLiveComposerText(channelId)
+                    ?? getDraft(channelId)
+                    ?? "";
             },
             replaceDraft(channelId, value) {
                 if (replaceVisibleComposerText(channelId, value)) {
