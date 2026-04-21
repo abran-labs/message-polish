@@ -58,10 +58,26 @@ const ImproveTextIcon: IconComponent = ({ height = 20, width = 20, className }) 
 
 const getDraft = (channelId: string) => DraftStore.getDraft(channelId, DraftType.ChannelMessage);
 
+function logDraftDebug(event: string, data: Record<string, unknown>): void {
+    console.warn(`[ai-improve-text] ${event}`, data);
+}
+
 function replaceVisibleComposerText(channelId: string, value: string): boolean {
     const editorRef = activeEditorRefByChannel.get(channelId);
     const slateEditor = editorRef?.ref?.current?.getSlateEditor?.();
-    if (!slateEditor) return false;
+    if (!slateEditor) {
+        logDraftDebug("replaceVisibleComposerText:no-editor", {
+            channelId,
+            value,
+            hasEditorRef: Boolean(editorRef),
+        });
+        return false;
+    }
+
+    logDraftDebug("replaceVisibleComposerText:apply", {
+        channelId,
+        value,
+    });
 
     Transforms.delete(slateEditor, {
         at: {
@@ -78,6 +94,10 @@ function replaceVisibleComposerText(channelId: string, value: string): boolean {
 
 function captureAndForwardEditorRef(originalSetEditorRef: ((ref: any) => void) | undefined, channelId: string) {
     return (ref: any) => {
+        logDraftDebug("captureAndForwardEditorRef", {
+            channelId,
+            hasRef: Boolean(ref),
+        });
         if (ref) {
             activeEditorRefByChannel.set(channelId, ref);
         } else {
@@ -252,6 +272,11 @@ export default definePlugin({
                     return;
                 }
 
+                logDraftDebug("replaceDraft:fallback-saveDraft", {
+                    channelId,
+                    draftType: DraftType.ChannelMessage,
+                    value,
+                });
                 DraftManager.saveDraft(channelId, DraftType.ChannelMessage, value);
             }
         });

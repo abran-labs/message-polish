@@ -12,7 +12,7 @@ export interface DraftController {
 }
 
 function logDraftDebug(event: string, data: Record<string, unknown>): void {
-    console.debug(`[ai-improve-text] ${event}`, data);
+    console.warn(`[ai-improve-text] ${event}`, data);
 }
 
 interface ChannelAbortState {
