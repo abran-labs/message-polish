@@ -13,11 +13,13 @@ import { providerAdapters } from "./providers";
 import { settings } from "./settings";
 import {
     allocateChannelAbortToken,
+    buildImproveTextPrompt,
     clearChannelAbortToken,
     commitDraftReplacement,
     isCurrentChannelAbortToken,
     patchState,
     resetState,
+    resolveChannelStylePreset,
     rollbackDraftReplacement,
     runWithChannelInFlight,
     runWithLoadingPlaceholderLoop,
@@ -99,6 +101,9 @@ export async function improveDraft(channelId: string): Promise<void> {
         return;
     }
 
+    const stylePreset = resolveChannelStylePreset(channelId, settings.store.stylePreset);
+    const prompt = buildImproveTextPrompt(input, stylePreset);
+
     try {
         await runWithChannelInFlight(channelId, async () => {
             patchState({
@@ -113,8 +118,8 @@ export async function improveDraft(channelId: string): Promise<void> {
                 const response = await runWithLoadingPlaceholderLoop(channelId, () => providerAdapter.improveText({
                     providerId,
                     model,
-                    input,
-                    stylePreset: settings.store.stylePreset,
+                    input: prompt,
+                    stylePreset,
                     signal: abortToken.signal,
                 }));
 

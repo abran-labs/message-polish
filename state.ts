@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { ImproveTextState } from "./types";
+import { ImproveTextState, ImproveTextStylePreset } from "./types";
 
 export interface DraftController {
     getDraft(channelId: string): string;
@@ -45,10 +45,64 @@ const inFlightChannels = new Set<string>();
 const abortStateByChannel = new Map<string, ChannelAbortState>();
 const tokenCounterByChannel = new Map<string, number>();
 const loadingPlaceholderIntervalByChannel = new Map<string, ReturnType<typeof setInterval>>();
+const stylePresetByChannel = new Map<string, ImproveTextStylePreset>();
 
 export const LOADING_PLACEHOLDER_BASE_TEXT = "AI is improving text";
+export const DEFAULT_STYLE_PRESET: ImproveTextStylePreset = "professional";
+export const STYLE_PROMPT_INSTRUCTIONS: Record<ImproveTextStylePreset, string> = {
+    professional: "Make it polished, clear, and professional.",
+    business: "Make it businesslike, concise, and suitable for a workplace context.",
+    casual: "Make it natural, friendly, and conversational without being sloppy.",
+    concise: "Make it shorter and tighter while preserving the meaning.",
+    explain: "Make it clearer, more explicit, and easier to understand.",
+};
 const LOADING_PLACEHOLDER_SUFFIXES = [".", "..", "..."] as const;
 const LOADING_PLACEHOLDER_INTERVAL_MS = 600;
+
+export function normalizeStylePreset(value: string | null | undefined): ImproveTextStylePreset {
+    switch (value) {
+        case "professional":
+        case "business":
+        case "casual":
+        case "concise":
+        case "explain":
+            return value;
+        default:
+            return DEFAULT_STYLE_PRESET;
+    }
+}
+
+export function getChannelStylePreset(channelId: string): ImproveTextStylePreset | null {
+    return stylePresetByChannel.get(channelId) ?? null;
+}
+
+export function setChannelStylePreset(channelId: string, value: string | null | undefined): ImproveTextStylePreset {
+    const normalized = normalizeStylePreset(value);
+    stylePresetByChannel.set(channelId, normalized);
+    return normalized;
+}
+
+export function resolveChannelStylePreset(channelId: string, defaultValue: string | null | undefined): ImproveTextStylePreset {
+    const existing = stylePresetByChannel.get(channelId);
+    if (existing) {
+        return existing;
+    }
+
+    return setChannelStylePreset(channelId, defaultValue);
+}
+
+export function buildImproveTextPrompt(input: string, stylePreset: ImproveTextStylePreset): string {
+    return [
+        "Improve the following message draft.",
+        STYLE_PROMPT_INSTRUCTIONS[stylePreset],
+        "Preserve the original intent and meaning.",
+        "Keep the same language as the original draft unless the draft itself asks to change language.",
+        "Return only the rewritten text with no explanation, framing, or quotes.",
+        "",
+        "Draft:",
+        input,
+    ].join("\n");
+}
 
 export function getState(): ImproveTextState {
     return state;
@@ -68,6 +122,7 @@ export function patchState(patch: Partial<ImproveTextState>): void {
 export function resetState(): void {
     state = { ...DEFAULT_STATE };
     stopAllLoadingPlaceholderLoops();
+    stylePresetByChannel.clear();
 }
 
 export function setDraftController(controller: DraftController | null): void {

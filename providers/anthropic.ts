@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import type { PluginNative } from "@utils/types";
+
 import { settings } from "../settings";
 import type {
     ImproveTextModel,
@@ -14,10 +16,7 @@ import type {
     ProviderAdapter,
 } from "../types";
 
-const ANTHROPIC_API_BASE = "https://api.anthropic.com/v1";
-const ANTHROPIC_MODELS_ENDPOINT = `${ANTHROPIC_API_BASE}/models`;
-const ANTHROPIC_MESSAGES_ENDPOINT = `${ANTHROPIC_API_BASE}/messages`;
-const ANTHROPIC_API_VERSION = "2023-06-01";
+const Native = VencordNative.pluginHelpers.AiImproveText as PluginNative<typeof import("../native")>;
 
 class AnthropicHttpError extends Error {
     constructor(
@@ -64,16 +63,9 @@ function getAnthropicApiKey(): string {
     return apiKey;
 }
 
-function createAnthropicHeaders(apiKey: string): HeadersInit {
-    return {
-        "x-api-key": apiKey,
-        "anthropic-version": ANTHROPIC_API_VERSION,
-    };
-}
-
-async function parseJsonSafe(response: Response): Promise<unknown> {
+async function parseJsonSafe(data: string): Promise<unknown> {
     try {
-        return await response.json();
+        return JSON.parse(data);
     } catch {
         return null;
     }
@@ -137,22 +129,20 @@ function isNetworkError(error: unknown): boolean {
     return /network|failed to fetch|load failed|fetch/i.test(error.message);
 }
 
-async function fetchAnthropic(input: RequestInfo | URL, init: RequestInit): Promise<Response> {
-    const response = await fetch(input, init);
+async function fetchAnthropic(dataPromise: Promise<{ status: number; data: string; }>): Promise<string> {
+    const response = await dataPromise;
 
-    if (response.ok) return response;
+    if (response.status >= 200 && response.status < 300) return response.data;
 
-    const responseBody = await parseJsonSafe(response);
+    const responseBody = await parseJsonSafe(response.data);
     throw new AnthropicHttpError(response.status, responseBody);
 }
 
 async function listModels(request?: { signal?: AbortSignal; }): Promise<ListModelsResult> {
     const apiKey = getAnthropicApiKey();
-    const response = await fetchAnthropic(ANTHROPIC_MODELS_ENDPOINT, {
-        method: "GET",
-        headers: createAnthropicHeaders(apiKey),
-        signal: request?.signal,
-    });
+    if (request?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
+    const response = await fetchAnthropic(Native.listAnthropicModels(apiKey));
 
     const body = await parseJsonSafe(response) as AnthropicModelsApiResponse;
     const rawModels = Array.isArray(body.data) ? body.data : [];
@@ -169,26 +159,16 @@ async function listModels(request?: { signal?: AbortSignal; }): Promise<ListMode
 
 async function improveText(request: ImproveTextRequest): Promise<ImproveTextResponse> {
     const apiKey = getAnthropicApiKey();
-    const input = request.stylePreset?.trim()
-        ? `Rewrite the following text in a ${request.stylePreset.trim()} style:\n\n${request.input}`
-        : request.input;
+    if (request.signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
-    const response = await fetchAnthropic(ANTHROPIC_MESSAGES_ENDPOINT, {
-        method: "POST",
-        headers: {
-            ...createAnthropicHeaders(apiKey),
-            "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
+    const response = await fetchAnthropic(Native.improveAnthropicText(apiKey, JSON.stringify({
             model: request.model,
             max_tokens: 1024,
             messages: [{
                 role: "user",
-                content: input,
+                content: request.input,
             }],
-        }),
-        signal: request.signal,
-    });
+        })));
 
     const body = await parseJsonSafe(response) as AnthropicMessagesApiResponse;
     const output = extractOutputText(body);

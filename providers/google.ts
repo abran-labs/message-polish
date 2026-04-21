@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import type { PluginNative } from "@utils/types";
+
 import { settings } from "../settings";
 import type {
     ImproveTextModel,
@@ -14,8 +16,7 @@ import type {
     ProviderAdapter,
 } from "../types";
 
-const GOOGLE_API_BASE = "https://generativelanguage.googleapis.com/v1beta";
-const GOOGLE_MODELS_ENDPOINT = `${GOOGLE_API_BASE}/models`;
+const Native = VencordNative.pluginHelpers.AiImproveText as PluginNative<typeof import("../native")>;
 
 class GoogleHttpError extends Error {
     constructor(
@@ -72,15 +73,9 @@ function getGoogleApiKey(): string {
     return apiKey;
 }
 
-function withApiKey(url: string, apiKey: string): string {
-    const requestUrl = new URL(url);
-    requestUrl.searchParams.set("key", apiKey);
-    return requestUrl.toString();
-}
-
-async function parseJsonSafe(response: Response): Promise<unknown> {
+async function parseJsonSafe(data: string): Promise<unknown> {
     try {
-        return await response.json();
+        return JSON.parse(data);
     } catch {
         return null;
     }
@@ -175,31 +170,25 @@ function isNetworkError(error: unknown): boolean {
     return /network|failed to fetch|load failed|fetch/i.test(error.message);
 }
 
-async function fetchGoogle(input: RequestInfo | URL, init: RequestInit): Promise<Response> {
-    const response = await fetch(input, init);
+async function fetchGoogle(dataPromise: Promise<{ status: number; data: string; }>): Promise<string> {
+    const response = await dataPromise;
 
-    if (response.ok) return response;
+    if (response.status >= 200 && response.status < 300) return response.data;
 
-    const responseBody = await parseJsonSafe(response);
+    const responseBody = await parseJsonSafe(response.data);
     throw new GoogleHttpError(response.status, responseBody);
 }
 
 async function listModels(request?: { signal?: AbortSignal; }): Promise<ListModelsResult> {
     const apiKey = getGoogleApiKey();
+    if (request?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
     const seenModelIds = new Set<string>();
     const models: ImproveTextModel[] = [];
     let nextPageToken: string | null = null;
 
     do {
-        const endpointUrl = new URL(withApiKey(GOOGLE_MODELS_ENDPOINT, apiKey));
-        if (nextPageToken) {
-            endpointUrl.searchParams.set("pageToken", nextPageToken);
-        }
-
-        const response = await fetchGoogle(endpointUrl, {
-            method: "GET",
-            signal: request?.signal,
-        });
+        const response = await fetchGoogle(Native.listGoogleModels(apiKey, nextPageToken ?? undefined));
 
         const body = await parseJsonSafe(response) as GoogleListModelsResponse;
         const rawModels = Array.isArray(body.models) ? body.models : [];
@@ -225,25 +214,16 @@ async function listModels(request?: { signal?: AbortSignal; }): Promise<ListMode
 
 async function improveText(request: ImproveTextRequest): Promise<ImproveTextResponse> {
     const apiKey = getGoogleApiKey();
-    const modelName = normalizeModelName(request.model);
-    const input = request.stylePreset?.trim()
-        ? `Rewrite the following text in a ${request.stylePreset.trim()} style:\n\n${request.input}`
-        : request.input;
+    if (request.signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
-    const endpoint = withApiKey(`${GOOGLE_API_BASE}/${modelName}:generateContent`, apiKey);
-    const response = await fetchGoogle(endpoint, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
+    const modelName = normalizeModelName(request.model);
+
+    const response = await fetchGoogle(Native.improveGoogleText(apiKey, modelName, JSON.stringify({
             contents: [{
                 role: "user",
-                parts: [{ text: input }],
+                parts: [{ text: request.input }],
             }],
-        }),
-        signal: request.signal,
-    });
+        })));
 
     const body = await parseJsonSafe(response) as GoogleGenerateContentResponse;
     const output = extractOutputText(body);

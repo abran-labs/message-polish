@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import type { PluginNative } from "@utils/types";
+
 import { settings } from "../settings";
 import type {
     ImproveTextModel,
@@ -14,9 +16,7 @@ import type {
     ProviderAdapter,
 } from "../types";
 
-const OPENAI_API_BASE = "https://api.openai.com/v1";
-const OPENAI_MODELS_ENDPOINT = `${OPENAI_API_BASE}/models`;
-const OPENAI_RESPONSES_ENDPOINT = `${OPENAI_API_BASE}/responses`;
+const Native = VencordNative.pluginHelpers.AiImproveText as PluginNative<typeof import("../native")>;
 
 class OpenAiHttpError extends Error {
     constructor(
@@ -57,15 +57,9 @@ function getOpenAiApiKey(): string {
     return apiKey;
 }
 
-function createOpenAiHeaders(apiKey: string): HeadersInit {
-    return {
-        Authorization: `Bearer ${apiKey}`,
-    };
-}
-
-async function parseJsonSafe(response: Response): Promise<unknown> {
+async function parseJsonSafe(data: string): Promise<unknown> {
     try {
-        return await response.json();
+        return JSON.parse(data);
     } catch {
         return null;
     }
@@ -129,22 +123,20 @@ function isNetworkError(error: unknown): boolean {
     return /network|failed to fetch|load failed|fetch/i.test(error.message);
 }
 
-async function fetchOpenAi(input: RequestInfo | URL, init: RequestInit): Promise<Response> {
-    const response = await fetch(input, init);
+async function fetchOpenAi(dataPromise: Promise<{ status: number; data: string; }>): Promise<string> {
+    const response = await dataPromise;
 
-    if (response.ok) return response;
+    if (response.status >= 200 && response.status < 300) return response.data;
 
-    const responseBody = await parseJsonSafe(response);
+    const responseBody = await parseJsonSafe(response.data);
     throw new OpenAiHttpError(response.status, responseBody);
 }
 
 async function listModels(request?: { signal?: AbortSignal; }): Promise<ListModelsResult> {
     const apiKey = getOpenAiApiKey();
-    const response = await fetchOpenAi(OPENAI_MODELS_ENDPOINT, {
-        method: "GET",
-        headers: createOpenAiHeaders(apiKey),
-        signal: request?.signal,
-    });
+    if (request?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
+    const response = await fetchOpenAi(Native.listOpenAiModels(apiKey));
 
     const body = await parseJsonSafe(response) as OpenAiModelsApiResponse;
     const rawModels = Array.isArray(body.data) ? body.data : [];
@@ -161,22 +153,12 @@ async function listModels(request?: { signal?: AbortSignal; }): Promise<ListMode
 
 async function improveText(request: ImproveTextRequest): Promise<ImproveTextResponse> {
     const apiKey = getOpenAiApiKey();
-    const input = request.stylePreset?.trim()
-        ? `Rewrite the following text in a ${request.stylePreset.trim()} style:\n\n${request.input}`
-        : request.input;
+    if (request.signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
-    const response = await fetchOpenAi(OPENAI_RESPONSES_ENDPOINT, {
-        method: "POST",
-        headers: {
-            ...createOpenAiHeaders(apiKey),
-            "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
+    const response = await fetchOpenAi(Native.improveOpenAiText(apiKey, JSON.stringify({
             model: request.model,
-            input,
-        }),
-        signal: request.signal,
-    });
+            input: request.input,
+        })));
 
     const body = await parseJsonSafe(response) as OpenAiResponsesApiResponse;
     const output = extractOutputText(body);
