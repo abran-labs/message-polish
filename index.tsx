@@ -31,6 +31,15 @@ import type { ImproveTextProviderId } from "./types";
 const DraftManager = findByPropsLazy("clearDraft", "saveDraft") as {
     saveDraft(channelId: string, draftType: number, value: string): void;
 };
+const Transforms = findByPropsLazy("insertNodes", "textToText") as {
+    delete(editor: object, options: object): void;
+    insertText(editor: object, text: string): void;
+};
+const Editor = findByPropsLazy("start", "end", "toSlateRange") as {
+    start(editor: object, path: never[]): object;
+    end(editor: object, path: never[]): object;
+};
+const activeEditorRefByChannel = new Map<string, any>();
 
 const ImproveTextIcon: IconComponent = ({ height = 20, width = 20, className }) => {
     return (
@@ -48,6 +57,36 @@ const ImproveTextIcon: IconComponent = ({ height = 20, width = 20, className }) 
 };
 
 const getDraft = (channelId: string) => DraftStore.getDraft(channelId, DraftType.ChannelMessage);
+
+function replaceVisibleComposerText(channelId: string, value: string): boolean {
+    const editorRef = activeEditorRefByChannel.get(channelId);
+    const slateEditor = editorRef?.ref?.current?.getSlateEditor?.();
+    if (!slateEditor) return false;
+
+    Transforms.delete(slateEditor, {
+        at: {
+            anchor: Editor.start(slateEditor, []),
+            focus: Editor.end(slateEditor, []),
+        }
+    });
+    if (value.length > 0) {
+        Transforms.insertText(slateEditor, value);
+    }
+
+    return true;
+}
+
+function captureAndForwardEditorRef(originalSetEditorRef: ((ref: any) => void) | undefined, channelId: string) {
+    return (ref: any) => {
+        if (ref) {
+            activeEditorRefByChannel.set(channelId, ref);
+        } else {
+            activeEditorRefByChannel.delete(channelId);
+        }
+
+        originalSetEditorRef?.(ref);
+    };
+}
 
 function getConfiguredProviderId(): ImproveTextProviderId | null {
     const selectedProvider = settings.store.provider;
@@ -193,6 +232,15 @@ export default definePlugin({
     authors: [{ name: "Sisyphus", id: 0n }],
     dependencies: ["ChatInputButtonAPI"],
     settings,
+    patches: [{
+        find: ".CREATE_FORUM_POST||",
+        replacement: {
+            match: /setEditorRef:(\i)(?=,textValue:\i,editorHeight:\i,channelId:(\i)\.id)/,
+            replace: "setEditorRef:$self.captureAndForwardEditorRef($1,$2.id)"
+        }
+    }],
+
+    captureAndForwardEditorRef,
 
     start() {
         setDraftController({
@@ -200,6 +248,10 @@ export default definePlugin({
                 return getDraft(channelId) ?? "";
             },
             replaceDraft(channelId, value) {
+                if (replaceVisibleComposerText(channelId, value)) {
+                    return;
+                }
+
                 DraftManager.saveDraft(channelId, DraftType.ChannelMessage, value);
             }
         });
@@ -208,6 +260,7 @@ export default definePlugin({
     stop() {
         abortAllInFlight("plugin_stopped");
         resetState();
+        activeEditorRefByChannel.clear();
         setDraftController(null);
     },
 
