@@ -166,7 +166,19 @@ export function replaceCurrentDraft(channelId: string, value: string): void {
         previousDraft: draftController.getDraft(channelId),
         nextDraft: value,
     });
-    draftController.replaceDraft(channelId, value);
+
+    try {
+        draftController.replaceDraft(channelId, value);
+    } catch (error) {
+        logDraftDebug("replaceCurrentDraft:error", {
+            channelId,
+            nextDraft: value,
+            message: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack : null,
+        });
+        throw error;
+    }
+
     let managedValues = managedDraftValuesByChannel.get(channelId);
     if (!managedValues) {
         managedValues = new Set<string>();

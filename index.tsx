@@ -66,6 +66,14 @@ function logDraftDebug(event: string, data: Record<string, unknown>): void {
 
 function replaceVisibleComposerText(channelId: string, value: string): boolean {
     const composerProps = latestComposerPropsByChannel.get(channelId);
+    logDraftDebug("replaceVisibleComposerText:entry", {
+        channelId,
+        hasComposerProps: Boolean(composerProps),
+        hasOnChange: typeof composerProps?.onChange === "function",
+        hasEditorRef: Boolean(activeEditorRefByChannel.get(channelId)),
+        value,
+    });
+
     if (typeof composerProps?.onChange === "function") {
         const richValueFromText = Transforms.textToText?.(value);
 
