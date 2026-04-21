@@ -5,18 +5,15 @@
  */
 
 import { ChatBarButton, ChatBarButtonFactory } from "@api/ChatButtons";
-import { Button } from "@components/Button";
-import { copyWithToast, sendMessage } from "@utils/discord";
-import { closeModal, ModalCloseButton, ModalContent, ModalFooter, ModalHeader, ModalRoot, ModalSize, openModal } from "@utils/modal";
+import { copyWithToast } from "@utils/discord";
 import definePlugin, { IconComponent } from "@utils/types";
-import { DraftStore, DraftType, Forms, TextArea, Toasts, useState, useStateFromStores } from "@webpack/common";
+import { DraftStore, DraftType, Toasts, useStateFromStores } from "@webpack/common";
 
 import { providerAdapters } from "./providers";
 import { settings } from "./settings";
 import { buildImproveTextPrompt, resolveChannelStylePreset } from "./state";
 import type { ImproveTextProviderId } from "./types";
 
-const armedChannels = new Set<string>();
 const inFlightChannels = new Set<string>();
 type ToastType = (typeof Toasts.Type)[keyof typeof Toasts.Type];
 
@@ -92,74 +89,46 @@ function validateConfiguration(): { providerId: ImproveTextProviderId; model: st
     return { providerId, model };
 }
 
-function toggleArmedChannel(channelId: string): void {
+async function improveAndCopyDraft(channelId: string): Promise<void> {
+    if (inFlightChannels.has(channelId)) return;
+
     const configuration = validateConfiguration();
     if (configuration == null) return;
 
-    if (armedChannels.has(channelId)) {
-        armedChannels.delete(channelId);
-        notify("AI review cancelled for the next send.");
-        return;
+    const input = getDraft(channelId)?.trim();
+    if (!input) return;
+
+    const { providerId, model } = configuration;
+    const providerAdapter = providerAdapters[providerId];
+
+    inFlightChannels.add(channelId);
+    notify("Improving text and copying to clipboard...");
+
+    const timeoutSignal = AbortSignal.timeout(20_000);
+
+    try {
+        const stylePreset = resolveChannelStylePreset(channelId, settings.store.stylePreset);
+        const prompt = buildImproveTextPrompt(input, stylePreset);
+        const response = await providerAdapter.improveText({
+            providerId,
+            model,
+            input: prompt,
+            stylePreset,
+            signal: timeoutSignal,
+        });
+
+        if (!response.output.trim()) {
+            notify("AI returned empty text. Nothing was copied.", Toasts.Type.FAILURE);
+            return;
+        }
+
+        await copyWithToast(response.output, "Improved message copied to clipboard.");
+    } catch (error) {
+        const providerError = providerAdapter.mapError(error);
+        notify(providerError.message, Toasts.Type.FAILURE);
+    } finally {
+        inFlightChannels.delete(channelId);
     }
-
-    armedChannels.add(channelId);
-    notify("AI review armed for your next send.");
-}
-
-function openImproveReviewModal(options: {
-    channelId: string;
-    improvedText: string;
-    onSendImproved(editedText: string): void;
-}): string {
-    const key = openModal(modalProps => {
-        const [editedText, setEditedText] = useState(options.improvedText);
-
-        return (
-            <ModalRoot {...modalProps} size={ModalSize.MEDIUM}>
-                <ModalHeader>
-                    <Forms.FormTitle tag="h2" style={{ flexGrow: 1 }}>Review AI improved message</Forms.FormTitle>
-                    <ModalCloseButton onClick={() => closeModal(key)} />
-                </ModalHeader>
-
-                <ModalContent>
-                    <Forms.FormText style={{ marginBottom: 12 }}>
-                        Review and edit the improved message before sending it.
-                    </Forms.FormText>
-                    <TextArea value={editedText} onChange={setEditedText} />
-                </ModalContent>
-
-                <ModalFooter>
-                    <div style={{ display: "flex", gap: 8, width: "100%", justifyContent: "flex-end" }}>
-                        <Button
-                            variant="secondary"
-                            onClick={async () => {
-                                await copyWithToast(editedText, "Improved message copied to clipboard.");
-                            }}
-                        >
-                            Copy improved
-                        </Button>
-                        <Button
-                            variant="secondary"
-                            onClick={() => closeModal(key)}
-                        >
-                            Cancel
-                        </Button>
-                        <Button
-                            onClick={() => {
-                                options.onSendImproved(editedText);
-                                closeModal(key);
-                            }}
-                            disabled={!editedText.trim()}
-                        >
-                            Send improved
-                        </Button>
-                    </div>
-                </ModalFooter>
-            </ModalRoot>
-        );
-    });
-
-    return key;
 }
 
 export function shouldShowImproveTextButton(options: {
@@ -179,100 +148,26 @@ const ImproveTextButton: ChatBarButtonFactory = ({ isAnyChat, channel: { id: cha
 
     if (!shouldShowImproveTextButton({ isAnyChat, showChatBarButton, draft })) return null;
 
-    const armed = armedChannels.has(channelId);
-
     return (
         <ChatBarButton
-            tooltip={armed ? "AI review armed for next send" : "Review next send with AI"}
-            onClick={() => toggleArmedChannel(channelId)}
+            tooltip="Improve with AI and copy result"
+            onClick={() => {
+                void improveAndCopyDraft(channelId);
+            }}
         >
-            <span style={{ color: armed ? "var(--brand-500)" : undefined, display: "inline-flex" }}>
-                <ImproveTextIcon />
-            </span>
+            <ImproveTextIcon />
         </ChatBarButton>
     );
 };
 
 export default definePlugin({
     name: "AiImproveText",
-    description: "Review an AI-improved version of your next message before sending.",
+    description: "Improve the current draft with AI and copy the result to your clipboard.",
     authors: [{ name: "Sisyphus", id: 0n }],
     dependencies: ["ChatInputButtonAPI"],
     settings,
 
-    async onBeforeMessageSend(channelId, messageObj, options) {
-        if (!armedChannels.has(channelId)) return;
-        armedChannels.delete(channelId);
-
-        if (inFlightChannels.has(channelId)) {
-            return { cancel: true };
-        }
-
-        const configuration = validateConfiguration();
-        if (configuration == null) {
-            return { cancel: true };
-        }
-
-        const { providerId, model } = configuration;
-        const providerAdapter = providerAdapters[providerId];
-        const input = messageObj.content?.trim();
-        if (!input) return;
-
-        inFlightChannels.add(channelId);
-        notify("Improving message for review...");
-
-        const timeoutSignal = AbortSignal.timeout(20_000);
-
-        try {
-            const stylePreset = resolveChannelStylePreset(channelId, settings.store.stylePreset);
-            const prompt = buildImproveTextPrompt(input, stylePreset);
-            const response = await providerAdapter.improveText({
-                providerId,
-                model,
-                input: prompt,
-                stylePreset,
-                signal: timeoutSignal,
-            });
-
-            if (!response.output.trim()) {
-                notify("AI returned empty text. Message was not sent.", Toasts.Type.FAILURE);
-                return { cancel: true };
-            }
-
-            openImproveReviewModal({
-                channelId,
-                improvedText: response.output,
-                onSendImproved: editedText => {
-                    void sendMessage(channelId, {
-                        content: editedText,
-                        tts: messageObj.tts,
-                        validNonShortcutEmojis: messageObj.validNonShortcutEmojis,
-                        invalidEmojis: messageObj.invalidEmojis,
-                    }, true, {
-                        stickerIds: options.stickers,
-                        attachmentsToUpload: options.uploads,
-                        allowedMentions: options.replyOptions.allowedMentions && {
-                            parse: options.replyOptions.allowedMentions.parse,
-                            replied_user: options.replyOptions.allowedMentions.repliedUser,
-                        },
-                        messageReference: options.replyOptions.messageReference,
-                    });
-                    notify("Improved message sent.");
-                }
-            });
-
-            return { cancel: true };
-        } catch (error) {
-            const providerError = providerAdapter.mapError(error);
-            notify(providerError.message, Toasts.Type.FAILURE);
-            return { cancel: true };
-        } finally {
-            inFlightChannels.delete(channelId);
-        }
-    },
-
     stop() {
-        armedChannels.clear();
         inFlightChannels.clear();
     },
 
