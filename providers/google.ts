@@ -187,11 +187,21 @@ function isNetworkError(error: unknown): boolean {
     return /network|failed to fetch|load failed|fetch/i.test(error.message);
 }
 
+function isNativeAbortData(data: string): boolean {
+    return /aborterror|aborted|cancelled|canceled/i.test(data);
+}
+
 async function fetchGoogle(dataPromise: Promise<{ status: number; data: string; }>): Promise<string> {
     const response = await dataPromise;
 
     if (response.status >= 200 && response.status < 300) return response.data;
-    if (response.status === -1) throw new TypeError(response.data);
+    if (response.status === -1) {
+        if (isNativeAbortData(response.data)) {
+            throw new DOMException("Aborted", "AbortError");
+        }
+
+        throw new TypeError(response.data);
+    }
 
     const responseBody = await parseJsonSafe(response.data);
     throw new GoogleHttpError(response.status, responseBody);
@@ -210,7 +220,19 @@ async function listModels(request?: { signal?: AbortSignal; }): Promise<ListMode
 
     try {
         do {
-            const response = await fetchGoogle(Native.listGoogleModels(requestIdBase, apiKey, nextPageToken ?? undefined));
+            if (request?.signal?.aborted) {
+                throw new DOMException("Aborted", "AbortError");
+            }
+
+            const pageRequestId = `${requestIdBase}:${nextPageToken ?? "first"}`;
+            const unbindPageAbort = bindAbortToNativeRequest(request?.signal, pageRequestId);
+            let response: string;
+
+            try {
+                response = await fetchGoogle(Native.listGoogleModels(pageRequestId, apiKey, nextPageToken ?? undefined));
+            } finally {
+                unbindPageAbort?.();
+            }
 
             const body = await parseJsonSafe(response) as GoogleListModelsResponse;
             const rawModels = Array.isArray(body.models) ? body.models : [];

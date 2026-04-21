@@ -140,11 +140,21 @@ function isNetworkError(error: unknown): boolean {
     return /network|failed to fetch|load failed|fetch/i.test(error.message);
 }
 
+function isNativeAbortData(data: string): boolean {
+    return /aborterror|aborted|cancelled|canceled/i.test(data);
+}
+
 async function fetchOpenAi(dataPromise: Promise<{ status: number; data: string; }>): Promise<string> {
     const response = await dataPromise;
 
     if (response.status >= 200 && response.status < 300) return response.data;
-    if (response.status === -1) throw new TypeError(response.data);
+    if (response.status === -1) {
+        if (isNativeAbortData(response.data)) {
+            throw new DOMException("Aborted", "AbortError");
+        }
+
+        throw new TypeError(response.data);
+    }
 
     const responseBody = await parseJsonSafe(response.data);
     throw new OpenAiHttpError(response.status, responseBody);

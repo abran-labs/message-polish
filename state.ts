@@ -122,11 +122,16 @@ export function patchState(patch: Partial<ImproveTextState>): void {
 
 export function resetState(): void {
     state = { ...DEFAULT_STATE };
+    stopAllLoadingPlaceholderLoops();
+
+    for (const channelId of originalDraftByChannel.keys()) {
+        restoreOriginalDraft(channelId);
+    }
+
     abortAllInFlight("reset");
     inFlightChannels.clear();
     originalDraftByChannel.clear();
     managedDraftValuesByChannel.clear();
-    stopAllLoadingPlaceholderLoops();
     stylePresetByChannel.clear();
 }
 
