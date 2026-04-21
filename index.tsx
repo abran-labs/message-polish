@@ -12,6 +12,7 @@ import { DraftStore, DraftType, showToast, Toasts, useStateFromStores } from "@w
 import { providerAdapters } from "./providers";
 import { settings } from "./settings";
 import {
+    abortAllInFlight,
     allocateChannelAbortToken,
     buildImproveTextPrompt,
     clearChannelAbortToken,
@@ -124,10 +125,16 @@ export async function improveDraft(channelId: string): Promise<void> {
                 }));
 
                 if (!isCurrentChannelAbortToken(channelId, abortToken.token)) return;
-                commitDraftReplacement(channelId, response.output);
+                if (!commitDraftReplacement(channelId, response.output)) {
+                    notifyImproveError("Draft changed while AI was working, so your latest edits were kept.");
+                }
             } catch (error) {
                 if (isCurrentChannelAbortToken(channelId, abortToken.token)) {
-                    rollbackDraftReplacement(channelId);
+                    const restored = rollbackDraftReplacement(channelId);
+                    if (!restored) {
+                        notifyImproveError("Draft changed while AI was working, so your latest edits were kept.");
+                        return;
+                    }
                 }
 
                 const providerError = providerAdapter.mapError(error);
@@ -199,8 +206,9 @@ export default definePlugin({
     },
 
     stop() {
-        setDraftController(null);
+        abortAllInFlight("plugin_stopped");
         resetState();
+        setDraftController(null);
     },
 
     chatBarButton: {

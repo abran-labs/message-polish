@@ -18,6 +18,23 @@ import type {
 
 const Native = VencordNative.pluginHelpers.AiImproveText as PluginNative<typeof import("../native")>;
 
+function createNativeRequestId(prefix: string): string {
+    return `${prefix}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+}
+
+function bindAbortToNativeRequest(signal: AbortSignal | undefined, requestId: string): (() => void) | null {
+    if (!signal) return null;
+
+    const cancel = () => void Native.cancelNativeRequest(requestId);
+    if (signal.aborted) {
+        cancel();
+        return null;
+    }
+
+    signal.addEventListener("abort", cancel, { once: true });
+    return () => signal.removeEventListener("abort", cancel);
+}
+
 class GoogleHttpError extends Error {
     constructor(
         public readonly status: number,
@@ -174,6 +191,7 @@ async function fetchGoogle(dataPromise: Promise<{ status: number; data: string; 
     const response = await dataPromise;
 
     if (response.status >= 200 && response.status < 300) return response.data;
+    if (response.status === -1) throw new TypeError(response.data);
 
     const responseBody = await parseJsonSafe(response.data);
     throw new GoogleHttpError(response.status, responseBody);
@@ -183,33 +201,40 @@ async function listModels(request?: { signal?: AbortSignal; }): Promise<ListMode
     const apiKey = getGoogleApiKey();
     if (request?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
+    const requestIdBase = createNativeRequestId("google-models");
+    const unbindAbort = bindAbortToNativeRequest(request?.signal, requestIdBase);
+
     const seenModelIds = new Set<string>();
     const models: ImproveTextModel[] = [];
     let nextPageToken: string | null = null;
 
-    do {
-        const response = await fetchGoogle(Native.listGoogleModels(apiKey, nextPageToken ?? undefined));
+    try {
+        do {
+            const response = await fetchGoogle(Native.listGoogleModels(requestIdBase, apiKey, nextPageToken ?? undefined));
 
-        const body = await parseJsonSafe(response) as GoogleListModelsResponse;
-        const rawModels = Array.isArray(body.models) ? body.models : [];
+            const body = await parseJsonSafe(response) as GoogleListModelsResponse;
+            const rawModels = Array.isArray(body.models) ? body.models : [];
 
-        for (const rawModel of rawModels) {
-            const model = normalizeModel(rawModel as GoogleModel);
-            if (!model || seenModelIds.has(model.id)) continue;
+            for (const rawModel of rawModels) {
+                const model = normalizeModel(rawModel as GoogleModel);
+                if (!model || seenModelIds.has(model.id)) continue;
 
-            seenModelIds.add(model.id);
-            models.push(model);
-        }
+                seenModelIds.add(model.id);
+                models.push(model);
+            }
 
-        nextPageToken = typeof body.nextPageToken === "string" && body.nextPageToken.trim()
-            ? body.nextPageToken
-            : null;
-    } while (nextPageToken);
+            nextPageToken = typeof body.nextPageToken === "string" && body.nextPageToken.trim()
+                ? body.nextPageToken
+                : null;
+        } while (nextPageToken);
 
-    return {
-        providerId: "google",
-        models,
-    };
+        return {
+            providerId: "google",
+            models,
+        };
+    } finally {
+        unbindAbort?.();
+    }
 }
 
 async function improveText(request: ImproveTextRequest): Promise<ImproveTextResponse> {
@@ -218,23 +243,30 @@ async function improveText(request: ImproveTextRequest): Promise<ImproveTextResp
 
     const modelName = normalizeModelName(request.model);
 
-    const response = await fetchGoogle(Native.improveGoogleText(apiKey, modelName, JSON.stringify({
-            contents: [{
-                role: "user",
-                parts: [{ text: request.input }],
-            }],
-        })));
+    const requestId = createNativeRequestId("google-improve");
+    const unbindAbort = bindAbortToNativeRequest(request.signal, requestId);
 
-    const body = await parseJsonSafe(response) as GoogleGenerateContentResponse;
-    const output = extractOutputText(body);
-    const firstCandidate = Array.isArray(body.candidates) ? body.candidates[0] as GoogleGenerateContentCandidate | undefined : undefined;
+    try {
+        const response = await fetchGoogle(Native.improveGoogleText(requestId, apiKey, modelName, JSON.stringify({
+                contents: [{
+                    role: "user",
+                    parts: [{ text: request.input }],
+                }],
+            })));
 
-    return {
-        providerId: "google",
-        model: modelName,
-        output,
-        finishReason: mapFinishReason(firstCandidate?.finishReason),
-    };
+        const body = await parseJsonSafe(response) as GoogleGenerateContentResponse;
+        const output = extractOutputText(body);
+        const firstCandidate = Array.isArray(body.candidates) ? body.candidates[0] as GoogleGenerateContentCandidate | undefined : undefined;
+
+        return {
+            providerId: "google",
+            model: modelName,
+            output,
+            finishReason: mapFinishReason(firstCandidate?.finishReason),
+        };
+    } finally {
+        unbindAbort?.();
+    }
 }
 
 function mapError(error: unknown): ImproveTextProviderError {

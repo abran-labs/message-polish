@@ -16,9 +16,17 @@ interface NativeRequestResult {
     data: string;
 }
 
-async function performRequest(url: string, init: RequestInit): Promise<NativeRequestResult> {
+const controllerByRequestId = new Map<string, AbortController>();
+
+async function performRequest(requestId: string, url: string, init: RequestInit): Promise<NativeRequestResult> {
+    const controller = new AbortController();
+    controllerByRequestId.set(requestId, controller);
+
     try {
-        const response = await fetch(url, init);
+        const response = await fetch(url, {
+            ...init,
+            signal: controller.signal,
+        });
         const data = await response.text();
         return {
             status: response.status,
@@ -29,6 +37,8 @@ async function performRequest(url: string, init: RequestInit): Promise<NativeReq
             status: -1,
             data: String(error),
         };
+    } finally {
+        controllerByRequestId.delete(requestId);
     }
 }
 
@@ -42,8 +52,17 @@ function withGoogleApiKey(url: string, apiKey: string, pageToken?: string): stri
     return requestUrl.toString();
 }
 
-export async function listOpenAiModels(_: IpcMainInvokeEvent, apiKey: string): Promise<NativeRequestResult> {
-    return await performRequest(`${OPENAI_API_BASE}/models`, {
+export function cancelNativeRequest(_: IpcMainInvokeEvent, requestId: string): boolean {
+    const controller = controllerByRequestId.get(requestId);
+    if (!controller) return false;
+
+    controller.abort("cancelled");
+    controllerByRequestId.delete(requestId);
+    return true;
+}
+
+export async function listOpenAiModels(_: IpcMainInvokeEvent, requestId: string, apiKey: string): Promise<NativeRequestResult> {
+    return await performRequest(requestId, `${OPENAI_API_BASE}/models`, {
         method: "GET",
         headers: {
             Authorization: `Bearer ${apiKey}`,
@@ -51,8 +70,8 @@ export async function listOpenAiModels(_: IpcMainInvokeEvent, apiKey: string): P
     });
 }
 
-export async function improveOpenAiText(_: IpcMainInvokeEvent, apiKey: string, payload: string): Promise<NativeRequestResult> {
-    return await performRequest(`${OPENAI_API_BASE}/responses`, {
+export async function improveOpenAiText(_: IpcMainInvokeEvent, requestId: string, apiKey: string, payload: string): Promise<NativeRequestResult> {
+    return await performRequest(requestId, `${OPENAI_API_BASE}/responses`, {
         method: "POST",
         headers: {
             Authorization: `Bearer ${apiKey}`,
@@ -62,8 +81,8 @@ export async function improveOpenAiText(_: IpcMainInvokeEvent, apiKey: string, p
     });
 }
 
-export async function listAnthropicModels(_: IpcMainInvokeEvent, apiKey: string): Promise<NativeRequestResult> {
-    return await performRequest(`${ANTHROPIC_API_BASE}/models`, {
+export async function listAnthropicModels(_: IpcMainInvokeEvent, requestId: string, apiKey: string): Promise<NativeRequestResult> {
+    return await performRequest(requestId, `${ANTHROPIC_API_BASE}/models`, {
         method: "GET",
         headers: {
             "x-api-key": apiKey,
@@ -72,8 +91,8 @@ export async function listAnthropicModels(_: IpcMainInvokeEvent, apiKey: string)
     });
 }
 
-export async function improveAnthropicText(_: IpcMainInvokeEvent, apiKey: string, payload: string): Promise<NativeRequestResult> {
-    return await performRequest(`${ANTHROPIC_API_BASE}/messages`, {
+export async function improveAnthropicText(_: IpcMainInvokeEvent, requestId: string, apiKey: string, payload: string): Promise<NativeRequestResult> {
+    return await performRequest(requestId, `${ANTHROPIC_API_BASE}/messages`, {
         method: "POST",
         headers: {
             "x-api-key": apiKey,
@@ -84,14 +103,14 @@ export async function improveAnthropicText(_: IpcMainInvokeEvent, apiKey: string
     });
 }
 
-export async function listGoogleModels(_: IpcMainInvokeEvent, apiKey: string, pageToken?: string): Promise<NativeRequestResult> {
-    return await performRequest(withGoogleApiKey(`${GOOGLE_API_BASE}/models`, apiKey, pageToken), {
+export async function listGoogleModels(_: IpcMainInvokeEvent, requestId: string, apiKey: string, pageToken?: string): Promise<NativeRequestResult> {
+    return await performRequest(requestId, withGoogleApiKey(`${GOOGLE_API_BASE}/models`, apiKey, pageToken), {
         method: "GET",
     });
 }
 
-export async function improveGoogleText(_: IpcMainInvokeEvent, apiKey: string, modelName: string, payload: string): Promise<NativeRequestResult> {
-    return await performRequest(withGoogleApiKey(`${GOOGLE_API_BASE}/${modelName}:generateContent`, apiKey), {
+export async function improveGoogleText(_: IpcMainInvokeEvent, requestId: string, apiKey: string, modelName: string, payload: string): Promise<NativeRequestResult> {
+    return await performRequest(requestId, withGoogleApiKey(`${GOOGLE_API_BASE}/${modelName}:generateContent`, apiKey), {
         method: "POST",
         headers: {
             "Content-Type": "application/json",

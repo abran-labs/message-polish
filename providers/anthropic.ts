@@ -18,6 +18,23 @@ import type {
 
 const Native = VencordNative.pluginHelpers.AiImproveText as PluginNative<typeof import("../native")>;
 
+function createNativeRequestId(prefix: string): string {
+    return `${prefix}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+}
+
+function bindAbortToNativeRequest(signal: AbortSignal | undefined, requestId: string): (() => void) | null {
+    if (!signal) return null;
+
+    const cancel = () => void Native.cancelNativeRequest(requestId);
+    if (signal.aborted) {
+        cancel();
+        return null;
+    }
+
+    signal.addEventListener("abort", cancel, { once: true });
+    return () => signal.removeEventListener("abort", cancel);
+}
+
 class AnthropicHttpError extends Error {
     constructor(
         public readonly status: number,
@@ -133,6 +150,7 @@ async function fetchAnthropic(dataPromise: Promise<{ status: number; data: strin
     const response = await dataPromise;
 
     if (response.status >= 200 && response.status < 300) return response.data;
+    if (response.status === -1) throw new TypeError(response.data);
 
     const responseBody = await parseJsonSafe(response.data);
     throw new AnthropicHttpError(response.status, responseBody);
@@ -142,43 +160,57 @@ async function listModels(request?: { signal?: AbortSignal; }): Promise<ListMode
     const apiKey = getAnthropicApiKey();
     if (request?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
-    const response = await fetchAnthropic(Native.listAnthropicModels(apiKey));
+    const requestId = createNativeRequestId("anthropic-models");
+    const unbindAbort = bindAbortToNativeRequest(request?.signal, requestId);
 
-    const body = await parseJsonSafe(response) as AnthropicModelsApiResponse;
-    const rawModels = Array.isArray(body.data) ? body.data : [];
+    try {
+        const response = await fetchAnthropic(Native.listAnthropicModels(requestId, apiKey));
 
-    const models = rawModels
-        .map(model => normalizeModel(model as AnthropicModel))
-        .filter((model): model is ImproveTextModel => model !== null);
+        const body = await parseJsonSafe(response) as AnthropicModelsApiResponse;
+        const rawModels = Array.isArray(body.data) ? body.data : [];
 
-    return {
-        providerId: "anthropic",
-        models,
-    };
+        const models = rawModels
+            .map(model => normalizeModel(model as AnthropicModel))
+            .filter((model): model is ImproveTextModel => model !== null);
+
+        return {
+            providerId: "anthropic",
+            models,
+        };
+    } finally {
+        unbindAbort?.();
+    }
 }
 
 async function improveText(request: ImproveTextRequest): Promise<ImproveTextResponse> {
     const apiKey = getAnthropicApiKey();
     if (request.signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
-    const response = await fetchAnthropic(Native.improveAnthropicText(apiKey, JSON.stringify({
+    const requestId = createNativeRequestId("anthropic-improve");
+    const unbindAbort = bindAbortToNativeRequest(request.signal, requestId);
+
+    try {
+        const response = await fetchAnthropic(Native.improveAnthropicText(requestId, apiKey, JSON.stringify({
+                model: request.model,
+                max_tokens: 1024,
+                messages: [{
+                    role: "user",
+                    content: request.input,
+                }],
+            })));
+
+        const body = await parseJsonSafe(response) as AnthropicMessagesApiResponse;
+        const output = extractOutputText(body);
+
+        return {
+            providerId: "anthropic",
             model: request.model,
-            max_tokens: 1024,
-            messages: [{
-                role: "user",
-                content: request.input,
-            }],
-        })));
-
-    const body = await parseJsonSafe(response) as AnthropicMessagesApiResponse;
-    const output = extractOutputText(body);
-
-    return {
-        providerId: "anthropic",
-        model: request.model,
-        output,
-        finishReason: mapStopReason(body.stop_reason),
-    };
+            output,
+            finishReason: mapStopReason(body.stop_reason),
+        };
+    } finally {
+        unbindAbort?.();
+    }
 }
 
 function mapError(error: unknown): ImproveTextProviderError {

@@ -45,6 +45,7 @@ const inFlightChannels = new Set<string>();
 const abortStateByChannel = new Map<string, ChannelAbortState>();
 const tokenCounterByChannel = new Map<string, number>();
 const loadingPlaceholderIntervalByChannel = new Map<string, ReturnType<typeof setInterval>>();
+const managedDraftValueByChannel = new Map<string, string>();
 const stylePresetByChannel = new Map<string, ImproveTextStylePreset>();
 
 export const LOADING_PLACEHOLDER_BASE_TEXT = "AI is improving text";
@@ -121,6 +122,10 @@ export function patchState(patch: Partial<ImproveTextState>): void {
 
 export function resetState(): void {
     state = { ...DEFAULT_STATE };
+    abortAllInFlight("reset");
+    inFlightChannels.clear();
+    originalDraftByChannel.clear();
+    managedDraftValueByChannel.clear();
     stopAllLoadingPlaceholderLoops();
     stylePresetByChannel.clear();
 }
@@ -148,26 +153,52 @@ export function clearOriginalDraftSnapshot(channelId: string): void {
 
 export function replaceCurrentDraft(channelId: string, value: string): void {
     draftController.replaceDraft(channelId, value);
+    managedDraftValueByChannel.set(channelId, value);
+}
+
+export function clearManagedDraftTracking(channelId: string): void {
+    managedDraftValueByChannel.delete(channelId);
+}
+
+export function hasManagedDraftConflict(channelId: string): boolean {
+    const expected = managedDraftValueByChannel.get(channelId);
+    if (expected == null) return false;
+
+    return draftController.getDraft(channelId) !== expected;
 }
 
 export function restoreOriginalDraft(channelId: string): boolean {
     const original = originalDraftByChannel.get(channelId);
     if (original == null) return false;
 
+    if (hasManagedDraftConflict(channelId)) {
+        originalDraftByChannel.delete(channelId);
+        clearManagedDraftTracking(channelId);
+        return false;
+    }
+
     draftController.replaceDraft(channelId, original);
     originalDraftByChannel.delete(channelId);
+    clearManagedDraftTracking(channelId);
     return true;
 }
 
 export function beginDraftReplacement(channelId: string, placeholder: string): string {
     const original = snapshotOriginalDraft(channelId);
-    draftController.replaceDraft(channelId, placeholder);
+    replaceCurrentDraft(channelId, placeholder);
     return original;
 }
 
-export function commitDraftReplacement(channelId: string, improvedText: string): void {
-    draftController.replaceDraft(channelId, improvedText);
+export function commitDraftReplacement(channelId: string, improvedText: string): boolean {
+    if (hasManagedDraftConflict(channelId)) {
+        originalDraftByChannel.delete(channelId);
+        clearManagedDraftTracking(channelId);
+        return false;
+    }
+
+    replaceCurrentDraft(channelId, improvedText);
     originalDraftByChannel.delete(channelId);
+    return true;
 }
 
 export function rollbackDraftReplacement(channelId: string): boolean {
@@ -235,6 +266,13 @@ export function abortChannelInFlight(channelId: string, reason = "aborted"): boo
     return true;
 }
 
+export function abortAllInFlight(reason = "aborted"): void {
+    for (const [channelId, existing] of abortStateByChannel) {
+        existing.controller.abort(reason);
+        abortStateByChannel.delete(channelId);
+    }
+}
+
 export function clearChannelAbortToken(channelId: string, token?: number): boolean {
     const existing = abortStateByChannel.get(channelId);
     if (existing == null) return false;
@@ -260,6 +298,11 @@ export function startLoadingPlaceholderLoop(channelId: string): void {
     beginDraftReplacement(channelId, getLoadingPlaceholderText(step));
 
     const interval = setInterval(() => {
+        if (hasManagedDraftConflict(channelId)) {
+            stopLoadingPlaceholderLoop(channelId);
+            return;
+        }
+
         step += 1;
         replaceCurrentDraft(channelId, getLoadingPlaceholderText(step));
     }, LOADING_PLACEHOLDER_INTERVAL_MS);

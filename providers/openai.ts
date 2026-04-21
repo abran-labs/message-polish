@@ -18,6 +18,23 @@ import type {
 
 const Native = VencordNative.pluginHelpers.AiImproveText as PluginNative<typeof import("../native")>;
 
+function createNativeRequestId(prefix: string): string {
+    return `${prefix}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+}
+
+function bindAbortToNativeRequest(signal: AbortSignal | undefined, requestId: string): (() => void) | null {
+    if (!signal) return null;
+
+    const cancel = () => void Native.cancelNativeRequest(requestId);
+    if (signal.aborted) {
+        cancel();
+        return null;
+    }
+
+    signal.addEventListener("abort", cancel, { once: true });
+    return () => signal.removeEventListener("abort", cancel);
+}
+
 class OpenAiHttpError extends Error {
     constructor(
         public readonly status: number,
@@ -127,6 +144,7 @@ async function fetchOpenAi(dataPromise: Promise<{ status: number; data: string; 
     const response = await dataPromise;
 
     if (response.status >= 200 && response.status < 300) return response.data;
+    if (response.status === -1) throw new TypeError(response.data);
 
     const responseBody = await parseJsonSafe(response.data);
     throw new OpenAiHttpError(response.status, responseBody);
@@ -136,39 +154,53 @@ async function listModels(request?: { signal?: AbortSignal; }): Promise<ListMode
     const apiKey = getOpenAiApiKey();
     if (request?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
-    const response = await fetchOpenAi(Native.listOpenAiModels(apiKey));
+    const requestId = createNativeRequestId("openai-models");
+    const unbindAbort = bindAbortToNativeRequest(request?.signal, requestId);
 
-    const body = await parseJsonSafe(response) as OpenAiModelsApiResponse;
-    const rawModels = Array.isArray(body.data) ? body.data : [];
+    try {
+        const response = await fetchOpenAi(Native.listOpenAiModels(requestId, apiKey));
 
-    const models = rawModels
-        .map(model => normalizeModel(model as OpenAiModel))
-        .filter((model): model is ImproveTextModel => model !== null);
+        const body = await parseJsonSafe(response) as OpenAiModelsApiResponse;
+        const rawModels = Array.isArray(body.data) ? body.data : [];
 
-    return {
-        providerId: "openai",
-        models,
-    };
+        const models = rawModels
+            .map(model => normalizeModel(model as OpenAiModel))
+            .filter((model): model is ImproveTextModel => model !== null);
+
+        return {
+            providerId: "openai",
+            models,
+        };
+    } finally {
+        unbindAbort?.();
+    }
 }
 
 async function improveText(request: ImproveTextRequest): Promise<ImproveTextResponse> {
     const apiKey = getOpenAiApiKey();
     if (request.signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
-    const response = await fetchOpenAi(Native.improveOpenAiText(apiKey, JSON.stringify({
+    const requestId = createNativeRequestId("openai-improve");
+    const unbindAbort = bindAbortToNativeRequest(request.signal, requestId);
+
+    try {
+        const response = await fetchOpenAi(Native.improveOpenAiText(requestId, apiKey, JSON.stringify({
+                model: request.model,
+                input: request.input,
+            })));
+
+        const body = await parseJsonSafe(response) as OpenAiResponsesApiResponse;
+        const output = extractOutputText(body);
+
+        return {
+            providerId: "openai",
             model: request.model,
-            input: request.input,
-        })));
-
-    const body = await parseJsonSafe(response) as OpenAiResponsesApiResponse;
-    const output = extractOutputText(body);
-
-    return {
-        providerId: "openai",
-        model: request.model,
-        output,
-        finishReason: "stop",
-    };
+            output,
+            finishReason: "stop",
+        };
+    } finally {
+        unbindAbort?.();
+    }
 }
 
 function mapError(error: unknown): ImproveTextProviderError {
