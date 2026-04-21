@@ -175,7 +175,13 @@ export function hasManagedDraftConflict(channelId: string): boolean {
     const managedValues = managedDraftValuesByChannel.get(channelId);
     if (managedValues == null || managedValues.size === 0) return false;
 
-    return !managedValues.has(draftController.getDraft(channelId));
+    const currentDraft = draftController.getDraft(channelId);
+    const originalDraft = originalDraftByChannel.get(channelId);
+
+    if (managedValues.has(currentDraft)) return false;
+    if (originalDraft != null && currentDraft === originalDraft) return false;
+
+    return true;
 }
 
 export function restoreOriginalDraft(channelId: string): boolean {
