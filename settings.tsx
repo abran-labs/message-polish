@@ -49,7 +49,6 @@ function ModelSelectorSetting(props: { setValue(newValue: string): void; }) {
     useEffect(() => {
         if (fetchedProvidersRef.current.has(selectedProvider)) return;
 
-        fetchedProvidersRef.current.add(selectedProvider);
         setStateByProvider(prev => ({
             ...prev,
             [selectedProvider]: {
@@ -65,6 +64,8 @@ function ModelSelectorSetting(props: { setValue(newValue: string): void; }) {
             .then(({ models }) => {
                 if (controller.signal.aborted) return;
 
+                fetchedProvidersRef.current.add(selectedProvider);
+
                 setStateByProvider(prev => ({
                     ...prev,
                     [selectedProvider]: {
@@ -75,7 +76,17 @@ function ModelSelectorSetting(props: { setValue(newValue: string): void; }) {
                 }));
             })
             .catch(error => {
-                if (controller.signal.aborted) return;
+                if (controller.signal.aborted) {
+                    setStateByProvider(prev => ({
+                        ...prev,
+                        [selectedProvider]: {
+                            status: "idle",
+                            models: [],
+                            error: null,
+                        }
+                    }));
+                    return;
+                }
 
                 const message = error instanceof Error
                     ? error.message
@@ -89,6 +100,7 @@ function ModelSelectorSetting(props: { setValue(newValue: string): void; }) {
                         error: message,
                     }
                 }));
+                fetchedProvidersRef.current.delete(selectedProvider);
             });
 
         return () => {
