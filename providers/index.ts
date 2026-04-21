@@ -4,8 +4,21 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { noopProvider } from "./noop";
+import type { ProviderAdapter, ImproveTextProviderId } from "../types";
+import { anthropicProviderAdapter } from "./anthropic";
+import { googleProviderAdapter } from "./google";
+import { openAiProviderAdapter } from "./openai";
 
-export const providers = [noopProvider];
+export const providerAdapters: Record<ImproveTextProviderId, ProviderAdapter> = {
+    openai: openAiProviderAdapter,
+    anthropic: anthropicProviderAdapter,
+    google: googleProviderAdapter,
+};
 
-export { noopProvider };
+export const providers = Object.values(providerAdapters);
+
+export {
+    anthropicProviderAdapter,
+    googleProviderAdapter,
+    openAiProviderAdapter,
+};

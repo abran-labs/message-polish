@@ -4,11 +4,48 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { ImproveTextProvider } from "../types";
+import type {
+    ImproveTextProviderError,
+    ImproveTextProviderId,
+    ImproveTextRequest,
+    ImproveTextResponse,
+    ListModelsResult,
+    ProviderAdapter,
+} from "../types";
 
-export const noopProvider: ImproveTextProvider = {
-    id: "noop",
-    label: "No Provider (Scaffold)",
-    isAvailable: () => true,
-    improve: async input => input,
-};
+function createNotImplementedError(providerId: ImproveTextProviderId, error: unknown): ImproveTextProviderError {
+    const message = error instanceof Error ? error.message : "Provider adapter is not implemented yet.";
+
+    return {
+        providerId,
+        code: "not_implemented",
+        message,
+        retryable: false,
+        cause: error,
+    };
+}
+
+function createStubModelList(providerId: ImproveTextProviderId): ListModelsResult {
+    return {
+        providerId,
+        models: [],
+    };
+}
+
+function createStubImproveResponse(request: ImproveTextRequest): ImproveTextResponse {
+    return {
+        providerId: request.providerId,
+        model: request.model,
+        output: request.input,
+        finishReason: "not_implemented",
+    };
+}
+
+export function createStubProviderAdapter(providerId: ImproveTextProviderId): ProviderAdapter {
+    return {
+        id: providerId,
+        listModels: async () => createStubModelList(providerId),
+        improveText: async request => createStubImproveResponse(request),
+        mapError: error => createNotImplementedError(providerId, error),
+    };
+}
