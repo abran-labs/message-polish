@@ -7,7 +7,6 @@
 export type ImproveTextProviderId = "openai" | "anthropic" | "google";
 export type ImproveTextStylePreset = "professional" | "business" | "casual" | "concise" | "explain";
 
-// Temporary compatibility type for scaffold/runtime defaults that still use noop.
 export type ImproveTextProviderSelection = ImproveTextProviderId | "noop";
 
 export interface ImproveTextRequest {
