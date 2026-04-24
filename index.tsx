@@ -9,6 +9,7 @@ import { showNotification } from "@api/Notifications";
 import { migratePluginSettings } from "@api/Settings";
 import { insertTextIntoChatInputBox } from "@utils/discord";
 import definePlugin, { IconComponent } from "@utils/types";
+import { filters, findBulk, proxyLazyWebpack } from "@webpack";
 import { ContextMenuApi, DraftStore, DraftType, Menu, React, Toasts, useStateFromStores } from "@webpack/common";
 
 import { providerAdapters } from "./providers";
@@ -20,6 +21,16 @@ const inFlightChannels = new Set<string>();
 type ToastType = (typeof Toasts.Type)[keyof typeof Toasts.Type];
 type ButtonVisualState = "idle" | "loading" | "success";
 const STYLE_ORDER: ImproveTextStylePreset[] = ["professional", "business", "casual", "concise", "explain"];
+const IMPROVED_VERSION_LABEL = "\n\n**Improved version:**\n";
+
+const { DraftManager } = proxyLazyWebpack(() => {
+    const [, DraftManager] = findBulk(
+        filters.byProps("pushLazy", "popAll"),
+        filters.byProps("clearDraft", "saveDraft"),
+    );
+
+    return { DraftManager };
+});
 
 const ImproveTextIcon: IconComponent & { visualState?: ButtonVisualState; } = ({
     height = 20,
@@ -113,6 +124,22 @@ async function copyToClipboardSilently(text: string): Promise<boolean> {
     } catch {
         return false;
     }
+}
+
+function replaceDraftText(channelId: string, nextText: string): boolean {
+    try {
+        if (DraftManager?.clearDraft == null) return false;
+        DraftManager.clearDraft(channelId, DraftType.ChannelMessage);
+        insertTextIntoChatInputBox(nextText);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function appendImprovedVersionFallback(improvedText: string): void {
+    const fallbackText = `${IMPROVED_VERSION_LABEL}${improvedText}`;
+    insertTextIntoChatInputBox(fallbackText);
 }
 
 function getConfiguredProviderId(): ImproveTextProviderId | null {
@@ -265,7 +292,11 @@ async function improveAndCopyDraft(channelId: string, options?: {
             return;
         }
 
-        insertTextIntoChatInputBox(improvedText);
+        const replacedDraft = replaceDraftText(channelId, improvedText);
+        if (!replacedDraft) {
+            appendImprovedVersionFallback(improvedText);
+        }
+
         await copyToClipboardSilently(improvedText);
         options?.onSuccess?.();
     } catch (error) {
