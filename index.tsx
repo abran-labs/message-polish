@@ -5,10 +5,11 @@
  */
 
 import { ChatBarButton, ChatBarButtonFactory } from "@api/ChatButtons";
+import { showNotification } from "@api/Notifications";
 import { migratePluginSettings } from "@api/Settings";
-import { copyWithToast } from "@utils/discord";
+import { insertTextIntoChatInputBox } from "@utils/discord";
 import definePlugin, { IconComponent } from "@utils/types";
-import { DraftStore, DraftType, Toasts, useStateFromStores } from "@webpack/common";
+import { ContextMenuApi, DraftStore, DraftType, Menu, Toasts, useStateFromStores } from "@webpack/common";
 
 import { providerAdapters } from "./providers";
 import { settings } from "./settings";
@@ -45,11 +46,21 @@ const ImproveTextIcon: IconComponent = ({ height = 20, width = 20, className }) 
 const getDraft = (channelId: string) => DraftStore.getDraft(channelId, DraftType.ChannelMessage);
 
 function notify(message: string, type: ToastType = Toasts.Type.SUCCESS): void {
-    Toasts.show({
-        message,
-        id: Toasts.genId(),
-        type,
+    void showNotification({
+        title: type === Toasts.Type.FAILURE ? "MessagePolish Error" : "MessagePolish",
+        body: message,
     });
+}
+
+async function copyToClipboardSilently(text: string): Promise<boolean> {
+    if (typeof navigator === "undefined" || navigator.clipboard == null) return false;
+
+    try {
+        await navigator.clipboard.writeText(text);
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 function getConfiguredProviderId(): ImproveTextProviderId | null {
@@ -122,6 +133,47 @@ function cycleStylePreset(channelId: string): void {
     setEffectiveStylePreset(channelId, nextStyle);
 }
 
+function ImproveTextContextMenu({
+    channelId,
+    stylePreset,
+}: {
+    channelId: string;
+    stylePreset: ImproveTextStylePreset;
+}) {
+    return (
+        <Menu.Menu
+            navId="vc-message-polish-menu"
+            onClose={ContextMenuApi.closeContextMenu}
+            aria-label="Message polish options"
+        >
+            <Menu.MenuGroup label="Writing style">
+                {STYLE_ORDER.map(preset => (
+                    <Menu.MenuRadioItem
+                        key={preset}
+                        id={`vc-message-polish-style-${preset}`}
+                        group="vc-message-polish-style"
+                        label={preset}
+                        checked={preset === stylePreset}
+                        action={() => {
+                            setEffectiveStylePreset(channelId, preset);
+                        }}
+                    />
+                ))}
+            </Menu.MenuGroup>
+
+            <Menu.MenuSeparator />
+
+            <Menu.MenuItem
+                id="vc-message-polish-cycle-style"
+                label="Cycle style"
+                action={() => {
+                    cycleStylePreset(channelId);
+                }}
+            />
+        </Menu.Menu>
+    );
+}
+
 async function improveAndCopyDraft(channelId: string): Promise<void> {
     if (inFlightChannels.has(channelId)) return;
 
@@ -150,12 +202,19 @@ async function improveAndCopyDraft(channelId: string): Promise<void> {
             signal: timeoutSignal,
         });
 
-        if (!response.output.trim()) {
-            notify("AI returned empty text. Nothing was copied.", Toasts.Type.FAILURE);
+        const improvedText = response.output.trim();
+        if (!improvedText) {
+            notify("AI returned empty text. Nothing changed.", Toasts.Type.FAILURE);
             return;
         }
 
-        await copyWithToast(response.output, "Improved message copied to clipboard.");
+        insertTextIntoChatInputBox(improvedText);
+        const copiedToClipboard = await copyToClipboardSilently(improvedText);
+        notify(
+            copiedToClipboard
+                ? "Improved message inserted into the chat box and copied to the clipboard."
+                : "Improved message inserted into the chat box.",
+        );
     } catch (error) {
         const providerError = providerAdapter.mapError(error);
         notify(providerError.message, Toasts.Type.FAILURE);
@@ -190,7 +249,9 @@ const ImproveTextButton: ChatBarButtonFactory = ({ isAnyChat, channel: { id: cha
             }}
             onContextMenu={event => {
                 event.preventDefault();
-                cycleStylePreset(channelId);
+                ContextMenuApi.openContextMenu(event, () => (
+                    <ImproveTextContextMenu channelId={channelId} stylePreset={stylePreset} />
+                ));
             }}
         >
             <ImproveTextIcon />
