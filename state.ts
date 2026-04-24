@@ -65,6 +65,7 @@ export function buildImproveTextPrompt(input: string, stylePreset: ImproveTextSt
         "Preserve the original intent and meaning.",
         "Keep the same language as the original draft unless the draft itself asks to change language.",
         "Use only Discord-compatible markdown.",
+        "Do not use em dashes or semicolons unless the draft clearly requires them. Prefer commas, periods, or simpler sentence structure instead.",
         "Do not add excessive headings, lists, or formatting if the original message does not call for them.",
         "Return only the rewritten text with no explanation, framing, or quotes.",
         "",
