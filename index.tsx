@@ -9,7 +9,7 @@ import { showNotification } from "@api/Notifications";
 import { migratePluginSettings } from "@api/Settings";
 import { insertTextIntoChatInputBox } from "@utils/discord";
 import definePlugin, { IconComponent } from "@utils/types";
-import { ContextMenuApi, DraftStore, DraftType, Menu, Toasts, useStateFromStores } from "@webpack/common";
+import { ContextMenuApi, DraftStore, DraftType, Menu, React, Toasts, useStateFromStores } from "@webpack/common";
 
 import { providerAdapters } from "./providers";
 import { settings } from "./settings";
@@ -18,9 +18,61 @@ import type { ImproveTextProviderId, ImproveTextStylePreset } from "./types";
 
 const inFlightChannels = new Set<string>();
 type ToastType = (typeof Toasts.Type)[keyof typeof Toasts.Type];
+type ButtonVisualState = "idle" | "loading" | "success";
 const STYLE_ORDER: ImproveTextStylePreset[] = ["professional", "business", "casual", "concise", "explain"];
 
-const ImproveTextIcon: IconComponent = ({ height = 20, width = 20, className }) => {
+const ImproveTextIcon: IconComponent & { visualState?: ButtonVisualState; } = ({
+    height = 20,
+    width = 20,
+    className,
+    visualState = "idle",
+}) => {
+    if (visualState === "loading") {
+        return (
+            <svg
+                fill="none"
+                width={width}
+                height={height}
+                className={className}
+                viewBox="0 0 24 24"
+            >
+                <circle cx="12" cy="12" r="8" stroke="currentColor" strokeOpacity="0.25" strokeWidth="2" />
+                <path d="M 12 4 A 8 8 0 0 1 20 12" stroke="currentColor" strokeLinecap="round" strokeWidth="2.5">
+                    <animateTransform
+                        attributeName="transform"
+                        attributeType="XML"
+                        dur="0.8s"
+                        from="0 12 12"
+                        repeatCount="indefinite"
+                        to="360 12 12"
+                        type="rotate"
+                    />
+                </path>
+            </svg>
+        );
+    }
+
+    if (visualState === "success") {
+        return (
+            <svg
+                fill="none"
+                width={width}
+                height={height}
+                className={className}
+                viewBox="0 0 24 24"
+            >
+                <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.25" strokeWidth="2" />
+                <path
+                    d="M 7 12.5 L 10.25 15.75 L 17 9"
+                    stroke="currentColor"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2.5"
+                />
+            </svg>
+        );
+    }
+
     return (
         <svg
             fill="currentColor"
@@ -174,7 +226,11 @@ function ImproveTextContextMenu({
     );
 }
 
-async function improveAndCopyDraft(channelId: string): Promise<void> {
+async function improveAndCopyDraft(channelId: string, options?: {
+    onStart?(): void;
+    onSuccess?(): void;
+    onError?(): void;
+}): Promise<void> {
     if (inFlightChannels.has(channelId)) return;
 
     const configuration = validateConfiguration();
@@ -187,7 +243,7 @@ async function improveAndCopyDraft(channelId: string): Promise<void> {
     const providerAdapter = providerAdapters[providerId];
 
     inFlightChannels.add(channelId);
-    notify("Improving text and copying to clipboard...");
+    options?.onStart?.();
 
     const timeoutSignal = AbortSignal.timeout(20_000);
 
@@ -205,19 +261,17 @@ async function improveAndCopyDraft(channelId: string): Promise<void> {
         const improvedText = response.output.trim();
         if (!improvedText) {
             notify("AI returned empty text. Nothing changed.", Toasts.Type.FAILURE);
+            options?.onError?.();
             return;
         }
 
         insertTextIntoChatInputBox(improvedText);
-        const copiedToClipboard = await copyToClipboardSilently(improvedText);
-        notify(
-            copiedToClipboard
-                ? "Improved message inserted into the chat box and copied to the clipboard."
-                : "Improved message inserted into the chat box.",
-        );
+        await copyToClipboardSilently(improvedText);
+        options?.onSuccess?.();
     } catch (error) {
         const providerError = providerAdapter.mapError(error);
         notify(providerError.message, Toasts.Type.FAILURE);
+        options?.onError?.();
     } finally {
         inFlightChannels.delete(channelId);
     }
@@ -238,14 +292,57 @@ const ImproveTextButton: ChatBarButtonFactory = ({ isAnyChat, channel: { id: cha
     const { showChatBarButton } = settings.use(["showChatBarButton", "stylePreset", "channelStyleMemory"]);
     const draft = useStateFromStores([DraftStore], () => getDraft(channelId));
     const stylePreset = getEffectiveStylePreset(channelId);
+    const [visualState, setVisualState] = React.useState<ButtonVisualState>("idle");
+    const resetVisualStateTimeoutRef = React.useRef<number | null>(null);
+
+    React.useEffect(() => {
+        return () => {
+            if (resetVisualStateTimeoutRef.current != null) {
+                window.clearTimeout(resetVisualStateTimeoutRef.current);
+            }
+        };
+    }, []);
 
     if (!shouldShowImproveTextButton({ isAnyChat, showChatBarButton, draft })) return null;
 
+    const resetVisualStateSoon = () => {
+        if (resetVisualStateTimeoutRef.current != null) {
+            window.clearTimeout(resetVisualStateTimeoutRef.current);
+        }
+
+        resetVisualStateTimeoutRef.current = window.setTimeout(() => {
+            setVisualState("idle");
+            resetVisualStateTimeoutRef.current = null;
+        }, 1200);
+    };
+
+    const tooltip = visualState === "loading"
+        ? "Improving with AI..."
+        : visualState === "success"
+            ? "Improved with AI"
+            : `Improve with AI (${stylePreset})`;
+
     return (
         <ChatBarButton
-            tooltip={`Improve with AI (${stylePreset})`}
+            tooltip={tooltip}
             onClick={() => {
-                void improveAndCopyDraft(channelId);
+                void improveAndCopyDraft(channelId, {
+                    onStart: () => {
+                        if (resetVisualStateTimeoutRef.current != null) {
+                            window.clearTimeout(resetVisualStateTimeoutRef.current);
+                            resetVisualStateTimeoutRef.current = null;
+                        }
+
+                        setVisualState("loading");
+                    },
+                    onSuccess: () => {
+                        setVisualState("success");
+                        resetVisualStateSoon();
+                    },
+                    onError: () => {
+                        setVisualState("idle");
+                    },
+                });
             }}
             onContextMenu={event => {
                 event.preventDefault();
@@ -254,7 +351,7 @@ const ImproveTextButton: ChatBarButtonFactory = ({ isAnyChat, channel: { id: cha
                 ));
             }}
         >
-            <ImproveTextIcon />
+            <ImproveTextIcon visualState={visualState} />
         </ChatBarButton>
     );
 };
