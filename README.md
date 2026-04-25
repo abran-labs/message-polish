@@ -4,7 +4,8 @@ Adds a chat bar button that improves your current message with AI and copies the
 
 Supports:
 - OpenAI, Anthropic, and Google
-- Per-channel style switching
+- Per-channel style selection, including prompt, pirate, and flirt modes
+- Optional recent-message context for reply-aware polishing
 - Tasteful markdown when it helps
 
 ## Install

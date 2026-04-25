@@ -8,7 +8,7 @@ import { ChatBarButton, ChatBarButtonFactory } from "@api/ChatButtons";
 import { showNotification } from "@api/Notifications";
 import { migratePluginSettings } from "@api/Settings";
 import definePlugin, { IconComponent } from "@utils/types";
-import { ContextMenuApi, DraftStore, DraftType, Menu, React, Toasts, useStateFromStores } from "@webpack/common";
+import { ContextMenuApi, DraftStore, DraftType, Menu, MessageStore, React, Toasts, useStateFromStores } from "@webpack/common";
 
 import { providerAdapters } from "./providers";
 import { settings } from "./settings";
@@ -18,7 +18,9 @@ import type { ImproveTextProviderId, ImproveTextStylePreset } from "./types";
 const inFlightChannels = new Set<string>();
 type ToastType = (typeof Toasts.Type)[keyof typeof Toasts.Type];
 type ButtonVisualState = "idle" | "loading" | "success";
-const STYLE_ORDER: ImproveTextStylePreset[] = ["professional", "business", "casual", "concise", "explain"];
+const STYLE_ORDER: ImproveTextStylePreset[] = ["professional", "business", "casual", "concise", "explain", "flirt", "pirate", "prompt"];
+const CONTEXT_CHAR_BUDGET = 1_200;
+const MAX_CONTEXT_MESSAGES = 12;
 
 const ImproveTextIcon: IconComponent & { visualState?: ButtonVisualState; } = ({
     height = 20,
@@ -171,6 +173,10 @@ function getChannelStyleMemory(): Record<string, ImproveTextStylePreset> {
     return (settings.store.channelStyleMemory as Record<string, ImproveTextStylePreset> | undefined) ?? {};
 }
 
+function getChannelReadContextMemory(): Record<string, boolean> {
+    return (settings.store.channelReadContextMemory as Record<string, boolean> | undefined) ?? {};
+}
+
 function getEffectiveStylePreset(channelId: string): ImproveTextStylePreset {
     const channelStyle = getChannelStyleMemory()[channelId];
     return normalizeStylePreset(channelStyle ?? settings.store.stylePreset);
@@ -183,20 +189,54 @@ function setEffectiveStylePreset(channelId: string, stylePreset: ImproveTextStyl
     };
 }
 
-function cycleStylePreset(channelId: string): void {
-    const currentStyle = getEffectiveStylePreset(channelId);
-    const currentIndex = STYLE_ORDER.indexOf(currentStyle);
-    const nextStyle = STYLE_ORDER[(currentIndex + 1) % STYLE_ORDER.length];
-    setEffectiveStylePreset(channelId, nextStyle);
+function getReadContextEnabled(channelId: string): boolean {
+    return getChannelReadContextMemory()[channelId] ?? false;
+}
+
+function setReadContextEnabled(channelId: string, enabled: boolean): void {
+    settings.store.channelReadContextMemory = {
+        ...getChannelReadContextMemory(),
+        [channelId]: enabled,
+    };
+}
+
+function formatMessageAuthor(message: ReturnType<typeof MessageStore.getMessages>["_array"][number]): string {
+    return message.author?.globalName ?? message.author?.username ?? "Unknown user";
+}
+
+function buildRecentMessageContext(channelId: string): string | undefined {
+    const messages = MessageStore.getMessages(channelId)?._array ?? [];
+    const contextLines: string[] = [];
+    let usedCharacters = 0;
+
+    for (let index = messages.length - 1; index >= 0 && contextLines.length < MAX_CONTEXT_MESSAGES; index--) {
+        const message = messages[index];
+        const content = message.content?.trim();
+        if (!content) continue;
+
+        const line = `${formatMessageAuthor(message)}: ${content}`;
+        const nextLength = usedCharacters + line.length;
+        if (contextLines.length > 0 && nextLength > CONTEXT_CHAR_BUDGET) break;
+
+        contextLines.unshift(line);
+        usedCharacters = nextLength;
+    }
+
+    return contextLines.length > 0 ? contextLines.join("\n") : undefined;
 }
 
 function ImproveTextContextMenu({
     channelId,
     stylePreset,
+    readContextEnabled,
 }: {
     channelId: string;
     stylePreset: ImproveTextStylePreset;
+    readContextEnabled: boolean;
 }) {
+    const [selectedStylePreset, setSelectedStylePreset] = React.useState(stylePreset);
+    const [isReadContextEnabled, setIsReadContextEnabled] = React.useState(readContextEnabled);
+
     return (
         <Menu.Menu
             navId="vc-message-polish-menu"
@@ -210,23 +250,29 @@ function ImproveTextContextMenu({
                         id={`vc-message-polish-style-${preset}`}
                         group="vc-message-polish-style"
                         label={preset}
-                        checked={preset === stylePreset}
+                        checked={preset === selectedStylePreset}
                         action={() => {
+                            setSelectedStylePreset(preset);
                             setEffectiveStylePreset(channelId, preset);
                         }}
                     />
                 ))}
             </Menu.MenuGroup>
 
-            <Menu.MenuSeparator />
-
-            <Menu.MenuItem
-                id="vc-message-polish-cycle-style"
-                label="Cycle style"
-                action={() => {
-                    cycleStylePreset(channelId);
-                }}
-            />
+            <Menu.MenuGroup>
+                <Menu.MenuCheckboxItem
+                    id="vc-message-polish-read-context"
+                    label="Read context"
+                    checked={selectedStylePreset !== "prompt" && isReadContextEnabled}
+                    disabled={selectedStylePreset === "prompt"}
+                    hint={selectedStylePreset === "prompt" ? "Prompt style ignores context" : undefined}
+                    action={() => {
+                        const nextEnabled = !isReadContextEnabled;
+                        setIsReadContextEnabled(nextEnabled);
+                        setReadContextEnabled(channelId, nextEnabled);
+                    }}
+                />
+            </Menu.MenuGroup>
         </Menu.Menu>
     );
 }
@@ -254,7 +300,10 @@ async function improveAndCopyDraft(channelId: string, options?: {
 
     try {
         const stylePreset = getEffectiveStylePreset(channelId);
-        const prompt = buildImproveTextPrompt(input, stylePreset);
+        const recentContext = stylePreset === "prompt" || !getReadContextEnabled(channelId)
+            ? undefined
+            : buildRecentMessageContext(channelId);
+        const prompt = buildImproveTextPrompt(input, stylePreset, recentContext);
         const response = await providerAdapter.improveText({
             providerId,
             model,
@@ -306,9 +355,10 @@ export function shouldShowImproveTextButton(options: {
 }
 
 const ImproveTextButton: ChatBarButtonFactory = ({ isAnyChat, channel: { id: channelId } }) => {
-    const { showChatBarButton } = settings.use(["showChatBarButton", "stylePreset", "channelStyleMemory"]);
+    const { showChatBarButton } = settings.use(["showChatBarButton", "stylePreset", "channelStyleMemory", "channelReadContextMemory"]);
     const draft = useStateFromStores([DraftStore], () => getDraft(channelId));
     const stylePreset = getEffectiveStylePreset(channelId);
+    const readContextEnabled = getReadContextEnabled(channelId);
     const [visualState, setVisualState] = React.useState<ButtonVisualState>("idle");
     const resetVisualStateTimeoutRef = React.useRef<number | null>(null);
 
@@ -364,7 +414,7 @@ const ImproveTextButton: ChatBarButtonFactory = ({ isAnyChat, channel: { id: cha
             onContextMenu={event => {
                 event.preventDefault();
                 ContextMenuApi.openContextMenu(event, () => (
-                    <ImproveTextContextMenu channelId={channelId} stylePreset={stylePreset} />
+                    <ImproveTextContextMenu channelId={channelId} stylePreset={stylePreset} readContextEnabled={readContextEnabled} />
                 ));
             }}
         >
