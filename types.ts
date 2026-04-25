@@ -5,7 +5,7 @@
  */
 
 export type ImproveTextProviderId = "openai" | "anthropic" | "google";
-export type ImproveTextStylePreset = "professional" | "business" | "casual" | "concise" | "explain";
+export type ImproveTextStylePreset = "professional" | "business" | "casual" | "concise" | "explain" | "prompt" | "pirate" | "flirt";
 
 export type ImproveTextProviderSelection = ImproveTextProviderId | "noop";
 

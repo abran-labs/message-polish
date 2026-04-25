@@ -15,6 +15,9 @@ export const STYLE_PROMPT_INSTRUCTIONS: Record<ImproveTextStylePreset, string> =
     casual: "Make it natural, friendly, and conversational without being sloppy.",
     concise: "Make it shorter and tighter while preserving the meaning.",
     explain: "Make it clearer, more explicit, and easier to understand.",
+    prompt: "Turn it into a stronger, clearer prompt for an AI model. Preserve the user's goal, constraints, and intent, but make the prompt easier for an AI to follow.",
+    pirate: "Rewrite it in playful pirate speak while preserving the original intent and meaning.",
+    flirt: "Make it warmer, more charming, and lightly flirty while preserving the original intent and respecting consent and boundaries.",
 };
 
 export const STYLE_MARKDOWN_GUIDANCE: Record<ImproveTextStylePreset, string> = {
@@ -23,6 +26,9 @@ export const STYLE_MARKDOWN_GUIDANCE: Record<ImproveTextStylePreset, string> = {
     casual: "Keep formatting light. Use Discord markdown only if it feels natural, such as a little emphasis or a short bold label, and avoid making it look overly formal.",
     concise: "Prioritize brevity over formatting. Only use Discord markdown if it makes the message noticeably easier to scan.",
     explain: "Use Discord markdown when it helps organize the explanation, such as short bold labels or occasional emphasis, but do not turn the message into a heavy structured document.",
+    prompt: "Use clear prompt structure only when it helps, such as concise sections for task, context, constraints, and output. Do not add fake requirements or details the draft did not imply.",
+    pirate: "Keep Discord markdown minimal. The pirate voice should come from wording, not heavy formatting.",
+    flirt: "Keep formatting light and natural. Do not make the message explicit, manipulative, or more intense than the draft implies.",
 };
 
 export function normalizeStylePreset(value: string | null | undefined): ImproveTextStylePreset {
@@ -32,6 +38,9 @@ export function normalizeStylePreset(value: string | null | undefined): ImproveT
         case "casual":
         case "concise":
         case "explain":
+        case "prompt":
+        case "pirate":
+        case "flirt":
             return value;
         default:
             return DEFAULT_STYLE_PRESET;
@@ -57,7 +66,16 @@ export function resolveChannelStylePreset(channelId: string, defaultValue: strin
     return setChannelStylePreset(channelId, defaultValue);
 }
 
-export function buildImproveTextPrompt(input: string, stylePreset: ImproveTextStylePreset): string {
+export function buildImproveTextPrompt(input: string, stylePreset: ImproveTextStylePreset, recentContext?: string): string {
+    const contextBlock = recentContext
+        ? [
+            "Recent chat context, oldest to newest:",
+            recentContext,
+            "Use this context only to make the draft fit the conversation. Do not quote, summarize, or answer the context unless the draft asks for it.",
+            "",
+        ]
+        : [];
+
     return [
         "Improve the following message draft.",
         STYLE_PROMPT_INSTRUCTIONS[stylePreset],
@@ -69,6 +87,7 @@ export function buildImproveTextPrompt(input: string, stylePreset: ImproveTextSt
         "Do not add excessive headings, lists, or formatting if the original message does not call for them.",
         "Return only the rewritten text with no explanation, framing, or quotes.",
         "",
+        ...contextBlock,
         "Draft:",
         input,
     ].join("\n");

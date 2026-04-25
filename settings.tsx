@@ -10,7 +10,7 @@ import { OptionType } from "@utils/types";
 export const settings = definePluginSettings({
     showChatBarButton: {
         type: OptionType.BOOLEAN,
-        description: "Show the AI message polish button. Right-click the button to cycle styles quickly.",
+        description: "Show the AI message polish button. Right-click the button to pick styles and toggle context.",
         default: true,
         restartNeeded: true,
     },
@@ -40,10 +40,18 @@ export const settings = definePluginSettings({
             { label: "Business", value: "business" },
             { label: "Casual", value: "casual" },
             { label: "Concise", value: "concise" },
-            { label: "Explain", value: "explain" }
+            { label: "Explain", value: "explain" },
+            { label: "Prompt", value: "prompt" },
+            { label: "Pirate", value: "pirate" },
+            { label: "Flirt", value: "flirt" }
         ] as const,
     },
     channelStyleMemory: {
+        type: OptionType.CUSTOM,
+        default: {},
+        hidden: true,
+    },
+    channelReadContextMemory: {
         type: OptionType.CUSTOM,
         default: {},
         hidden: true,
