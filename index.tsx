@@ -22,6 +22,18 @@ const STYLE_ORDER: ImproveTextStylePreset[] = ["professional", "business", "casu
 const CONTEXT_CHAR_BUDGET = 1_200;
 const MAX_CONTEXT_MESSAGES = 12;
 
+const StartImproveIcon: IconComponent = ({ height = 20, width = 20, className }) => (
+    <svg
+        fill="currentColor"
+        width={width}
+        height={height}
+        className={className}
+        viewBox="0 0 24 24"
+    >
+        <path d="M 8 5.14 V 18.86 C 8 19.63 8.84 20.11 9.5 19.72 L 20.45 12.86 C 21.06 12.48 21.06 11.52 20.45 11.14 L 9.5 4.28 C 8.84 3.89 8 4.37 8 5.14 Z" />
+    </svg>
+);
+
 const ImproveTextIcon: IconComponent & { visualState?: ButtonVisualState; } = ({
     height = 20,
     width = 20,
@@ -229,10 +241,12 @@ function ImproveTextContextMenu({
     channelId,
     stylePreset,
     readContextEnabled,
+    onImprove,
 }: {
     channelId: string;
     stylePreset: ImproveTextStylePreset;
     readContextEnabled: boolean;
+    onImprove(): void;
 }) {
     const [selectedStylePreset, setSelectedStylePreset] = React.useState(stylePreset);
     const [isReadContextEnabled, setIsReadContextEnabled] = React.useState(readContextEnabled);
@@ -243,7 +257,17 @@ function ImproveTextContextMenu({
             onClose={ContextMenuApi.closeContextMenu}
             aria-label="Message polish options"
         >
-            <Menu.MenuGroup label="Writing style">
+            <Menu.MenuItem
+                id="vc-message-polish-improve-now"
+                label="Improve now"
+                icon={StartImproveIcon}
+                action={() => {
+                    ContextMenuApi.closeContextMenu();
+                    onImprove();
+                }}
+            />
+
+            <Menu.MenuGroup>
                 {STYLE_ORDER.map(preset => (
                     <Menu.MenuRadioItem
                         key={preset}
@@ -389,32 +413,36 @@ const ImproveTextButton: ChatBarButtonFactory = ({ isAnyChat, channel: { id: cha
             ? "Improved with AI"
             : `Improve with AI (${stylePreset})`;
 
+    const runImprove = () => {
+        void improveAndCopyDraft(channelId, {
+            onStart: () => {
+                if (resetVisualStateTimeoutRef.current != null) {
+                    window.clearTimeout(resetVisualStateTimeoutRef.current);
+                    resetVisualStateTimeoutRef.current = null;
+                }
+
+                setVisualState("loading");
+            },
+            onSuccess: () => {
+                setVisualState("success");
+                resetVisualStateSoon();
+            },
+            onError: () => {
+                setVisualState("idle");
+            },
+        });
+    };
+
     return (
         <ChatBarButton
             tooltip={tooltip}
             onClick={() => {
-                void improveAndCopyDraft(channelId, {
-                    onStart: () => {
-                        if (resetVisualStateTimeoutRef.current != null) {
-                            window.clearTimeout(resetVisualStateTimeoutRef.current);
-                            resetVisualStateTimeoutRef.current = null;
-                        }
-
-                        setVisualState("loading");
-                    },
-                    onSuccess: () => {
-                        setVisualState("success");
-                        resetVisualStateSoon();
-                    },
-                    onError: () => {
-                        setVisualState("idle");
-                    },
-                });
+                runImprove();
             }}
             onContextMenu={event => {
                 event.preventDefault();
                 ContextMenuApi.openContextMenu(event, () => (
-                    <ImproveTextContextMenu channelId={channelId} stylePreset={stylePreset} readContextEnabled={readContextEnabled} />
+                    <ImproveTextContextMenu channelId={channelId} stylePreset={stylePreset} readContextEnabled={readContextEnabled} onImprove={runImprove} />
                 ));
             }}
         >
