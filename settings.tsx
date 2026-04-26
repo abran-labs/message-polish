@@ -19,6 +19,7 @@ export const settings = definePluginSettings({
         description: "AI provider used for text improvement",
         options: [
             { label: "OpenAI", value: "openai", default: true },
+            { label: "Codex OAuth (experimental)", value: "codex_oauth" },
             { label: "Anthropic", value: "anthropic" },
             { label: "Google", value: "google" }
         ] as const,
@@ -27,7 +28,7 @@ export const settings = definePluginSettings({
         type: OptionType.STRING,
         description: "Manual model ID to use for the selected provider.",
         default: "",
-        placeholder: "e.g. gpt-4.1-mini, claude-3-5-sonnet-latest, gemini-2.5-flash",
+        placeholder: "e.g. gpt-5, gpt-4.1-mini, claude-3-5-sonnet-latest, gemini-2.5-flash",
         componentProps: {
             type: "text"
         },

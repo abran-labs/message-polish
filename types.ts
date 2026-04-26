@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-export type ImproveTextProviderId = "openai" | "anthropic" | "google";
+export type ImproveTextProviderId = "openai" | "codex_oauth" | "anthropic" | "google";
 export type ImproveTextStylePreset = "professional" | "business" | "casual" | "concise" | "explain" | "prompt" | "pirate" | "flirt";
 
 export type ImproveTextProviderSelection = ImproveTextProviderId | "noop";

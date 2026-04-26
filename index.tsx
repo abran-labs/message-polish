@@ -136,7 +136,7 @@ function replaceDraftText(channelId: string, nextText: string): boolean {
 
 function getConfiguredProviderId(): ImproveTextProviderId | null {
     const selectedProvider = settings.store.provider;
-    if (selectedProvider === "openai" || selectedProvider === "anthropic" || selectedProvider === "google") {
+    if (selectedProvider === "openai" || selectedProvider === "codex_oauth" || selectedProvider === "anthropic" || selectedProvider === "google") {
         return selectedProvider;
     }
 
@@ -147,6 +147,8 @@ function getProviderApiKey(providerId: ImproveTextProviderId): string {
     switch (providerId) {
         case "openai":
             return settings.store.openAiApiKey?.trim() ?? "";
+        case "codex_oauth":
+            return "";
         case "anthropic":
             return settings.store.anthropicApiKey?.trim() ?? "";
         case "google":
@@ -173,7 +175,7 @@ function validateConfiguration(): { providerId: ImproveTextProviderId; model: st
         return null;
     }
 
-    if (!getProviderApiKey(providerId)) {
+    if (providerId !== "codex_oauth" && !getProviderApiKey(providerId)) {
         notify(`${providerAdapter.id} API key is missing. Add it in plugin settings.`, Toasts.Type.FAILURE);
         return null;
     }
