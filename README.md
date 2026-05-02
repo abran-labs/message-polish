@@ -1,6 +1,6 @@
 # MessagePolish
 
-Adds a chat bar button that improves your current message with AI and copies the improved result to your system clipboard.
+Adds a leftmost chat bar button that improves your current message with AI and inserts the improved result into the composer.
 
 Supports:
 - OpenAI, Anthropic, and Google

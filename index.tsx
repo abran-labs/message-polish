@@ -7,7 +7,8 @@
 import { ChatBarButton, ChatBarButtonFactory } from "@api/ChatButtons";
 import { showNotification } from "@api/Notifications";
 import { migratePluginSettings } from "@api/Settings";
-import definePlugin, { IconComponent } from "@utils/types";
+import { insertTextIntoChatInputBox } from "@utils/discord";
+import definePlugin, { IconComponent, StartAt } from "@utils/types";
 import { ContextMenuApi, DraftStore, DraftType, Menu, MessageStore, React, Toasts, useStateFromStores } from "@webpack/common";
 
 import { providerAdapters } from "./providers";
@@ -115,23 +116,6 @@ function notify(message: string, type: ToastType = Toasts.Type.SUCCESS): void {
         title: type === Toasts.Type.FAILURE ? "MessagePolish Error" : "MessagePolish",
         body: message,
     });
-}
-
-async function copyToClipboardSilently(text: string): Promise<boolean> {
-    if (typeof navigator === "undefined" || navigator.clipboard == null) return false;
-
-    try {
-        await navigator.clipboard.writeText(text);
-        return true;
-    } catch {
-        return false;
-    }
-}
-
-function replaceDraftText(channelId: string, nextText: string): boolean {
-    void channelId;
-    void nextText;
-    return false;
 }
 
 function getConfiguredProviderId(): ImproveTextProviderId | null {
@@ -303,7 +287,7 @@ function ImproveTextContextMenu({
     );
 }
 
-async function improveAndCopyDraft(channelId: string, options?: {
+async function improveAndInsertDraft(channelId: string, options?: {
     onStart?(): void;
     onSuccess?(): void;
     onError?(): void;
@@ -345,19 +329,7 @@ async function improveAndCopyDraft(channelId: string, options?: {
             return;
         }
 
-        const replacedDraft = replaceDraftText(channelId, improvedText);
-        const copiedToClipboard = await copyToClipboardSilently(improvedText);
-
-        if (!replacedDraft) {
-            notify(
-                copiedToClipboard
-                    ? "Could not replace the draft, so the improved text was copied to your clipboard instead."
-                    : "Could not replace the draft.",
-                Toasts.Type.FAILURE,
-            );
-            options?.onError?.();
-            return;
-        }
+        insertTextIntoChatInputBox(improvedText);
 
         options?.onSuccess?.();
     } catch (error) {
@@ -416,7 +388,7 @@ const ImproveTextButton: ChatBarButtonFactory = ({ isAnyChat, channel: { id: cha
             : `Improve with AI (${stylePreset})`;
 
     const runImprove = () => {
-        void improveAndCopyDraft(channelId, {
+        void improveAndInsertDraft(channelId, {
             onStart: () => {
                 if (resetVisualStateTimeoutRef.current != null) {
                     window.clearTimeout(resetVisualStateTimeoutRef.current);
@@ -436,20 +408,22 @@ const ImproveTextButton: ChatBarButtonFactory = ({ isAnyChat, channel: { id: cha
     };
 
     return (
-        <ChatBarButton
-            tooltip={tooltip}
-            onClick={() => {
-                runImprove();
-            }}
-            onContextMenu={event => {
-                event.preventDefault();
-                ContextMenuApi.openContextMenu(event, () => (
-                    <ImproveTextContextMenu channelId={channelId} stylePreset={stylePreset} readContextEnabled={readContextEnabled} onImprove={runImprove} />
-                ));
-            }}
-        >
-            <ImproveTextIcon visualState={visualState} />
-        </ChatBarButton>
+        <div style={{ order: -1 }}>
+            <ChatBarButton
+                tooltip={tooltip}
+                onClick={() => {
+                    runImprove();
+                }}
+                onContextMenu={event => {
+                    event.preventDefault();
+                    ContextMenuApi.openContextMenu(event, () => (
+                        <ImproveTextContextMenu channelId={channelId} stylePreset={stylePreset} readContextEnabled={readContextEnabled} onImprove={runImprove} />
+                    ));
+                }}
+            >
+                <ImproveTextIcon visualState={visualState} />
+            </ChatBarButton>
+        </div>
     );
 };
 
@@ -458,6 +432,7 @@ export default definePlugin({
     description: "Improve your current messages with AI.",
     authors: [{ name: "Sisyphus", id: 0n }],
     dependencies: ["ChatInputButtonAPI"],
+    startAt: StartAt.Init,
     settings,
 
     stop() {
