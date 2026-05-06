@@ -175,6 +175,10 @@ function getChannelReadContextMemory(): Record<string, boolean> {
     return (settings.store.channelReadContextMemory as Record<string, boolean> | undefined) ?? {};
 }
 
+function getChannelRephraseMemory(): Record<string, boolean> {
+    return (settings.store.channelRephraseMemory as Record<string, boolean> | undefined) ?? {};
+}
+
 function getEffectiveStylePreset(channelId: string): ImproveTextStylePreset {
     const channelStyle = getChannelStyleMemory()[channelId];
     return normalizeStylePreset(channelStyle ?? settings.store.stylePreset);
@@ -194,6 +198,17 @@ function getReadContextEnabled(channelId: string): boolean {
 function setReadContextEnabled(channelId: string, enabled: boolean): void {
     settings.store.channelReadContextMemory = {
         ...getChannelReadContextMemory(),
+        [channelId]: enabled,
+    };
+}
+
+function getRephraseEnabled(channelId: string): boolean {
+    return getChannelRephraseMemory()[channelId] ?? false;
+}
+
+function setRephraseEnabled(channelId: string, enabled: boolean): void {
+    settings.store.channelRephraseMemory = {
+        ...getChannelRephraseMemory(),
         [channelId]: enabled,
     };
 }
@@ -227,15 +242,18 @@ function ImproveTextContextMenu({
     channelId,
     stylePreset,
     readContextEnabled,
+    rephraseEnabled,
     onImprove,
 }: {
     channelId: string;
     stylePreset: ImproveTextStylePreset;
     readContextEnabled: boolean;
+    rephraseEnabled: boolean;
     onImprove(): void;
 }) {
     const [selectedStylePreset, setSelectedStylePreset] = React.useState(stylePreset);
     const [isReadContextEnabled, setIsReadContextEnabled] = React.useState(readContextEnabled);
+    const [isRephraseEnabled, setIsRephraseEnabled] = React.useState(rephraseEnabled);
 
     return (
         <Menu.Menu
@@ -282,6 +300,16 @@ function ImproveTextContextMenu({
                         setReadContextEnabled(channelId, nextEnabled);
                     }}
                 />
+                <Menu.MenuCheckboxItem
+                    id="vc-message-polish-rephrase"
+                    label="Rephrase"
+                    checked={isRephraseEnabled}
+                    action={() => {
+                        const nextEnabled = !isRephraseEnabled;
+                        setIsRephraseEnabled(nextEnabled);
+                        setRephraseEnabled(channelId, nextEnabled);
+                    }}
+                />
             </Menu.MenuGroup>
         </Menu.Menu>
     );
@@ -313,7 +341,7 @@ async function improveAndInsertDraft(channelId: string, options?: {
         const recentContext = stylePreset === "prompt" || !getReadContextEnabled(channelId)
             ? undefined
             : buildRecentMessageContext(channelId);
-        const prompt = buildImproveTextPrompt(input, stylePreset, recentContext);
+        const prompt = buildImproveTextPrompt(input, stylePreset, recentContext, getRephraseEnabled(channelId));
         const response = await providerAdapter.improveText({
             providerId,
             model,
@@ -353,10 +381,11 @@ export function shouldShowImproveTextButton(options: {
 }
 
 const ImproveTextButton: ChatBarButtonFactory = ({ isAnyChat, channel: { id: channelId } }) => {
-    const { showChatBarButton } = settings.use(["showChatBarButton", "stylePreset", "channelStyleMemory", "channelReadContextMemory"]);
+    const { showChatBarButton } = settings.use(["showChatBarButton", "stylePreset", "channelStyleMemory", "channelReadContextMemory", "channelRephraseMemory"]);
     const draft = useStateFromStores([DraftStore], () => getDraft(channelId));
     const stylePreset = getEffectiveStylePreset(channelId);
     const readContextEnabled = getReadContextEnabled(channelId);
+    const rephraseEnabled = getRephraseEnabled(channelId);
     const [visualState, setVisualState] = React.useState<ButtonVisualState>("idle");
     const resetVisualStateTimeoutRef = React.useRef<number | null>(null);
 
@@ -417,7 +446,7 @@ const ImproveTextButton: ChatBarButtonFactory = ({ isAnyChat, channel: { id: cha
                 onContextMenu={event => {
                     event.preventDefault();
                     ContextMenuApi.openContextMenu(event, () => (
-                        <ImproveTextContextMenu channelId={channelId} stylePreset={stylePreset} readContextEnabled={readContextEnabled} onImprove={runImprove} />
+                        <ImproveTextContextMenu channelId={channelId} stylePreset={stylePreset} readContextEnabled={readContextEnabled} rephraseEnabled={rephraseEnabled} onImprove={runImprove} />
                     ));
                 }}
             >

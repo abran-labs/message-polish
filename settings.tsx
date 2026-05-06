@@ -57,6 +57,11 @@ export const settings = definePluginSettings({
         default: {},
         hidden: true,
     },
+    channelRephraseMemory: {
+        type: OptionType.CUSTOM,
+        default: {},
+        hidden: true,
+    },
     openAiApiKey: {
         type: OptionType.STRING,
         description: "OpenAI API key",
