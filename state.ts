@@ -66,7 +66,7 @@ export function resolveChannelStylePreset(channelId: string, defaultValue: strin
     return setChannelStylePreset(channelId, defaultValue);
 }
 
-export function buildImproveTextPrompt(input: string, stylePreset: ImproveTextStylePreset, recentContext?: string): string {
+export function buildImproveTextPrompt(input: string, stylePreset: ImproveTextStylePreset, recentContext?: string, rephraseEnabled = false): string {
     const contextBlock = recentContext
         ? [
             "Recent chat context, oldest to newest:",
@@ -76,11 +76,19 @@ export function buildImproveTextPrompt(input: string, stylePreset: ImproveTextSt
         ]
         : [];
 
+    const rephraseInstructionBlock = rephraseEnabled
+        ? [
+            "Infer the user's intended message and fully rephrase it into shorter, clearer, and better-structured wording that matches the selected style.",
+            "Do not only correct wording; rewrite the full message for clarity, flow, and concision while preserving intent.",
+        ]
+        : [];
+
     return [
         "Improve the following message draft.",
         STYLE_PROMPT_INSTRUCTIONS[stylePreset],
         STYLE_MARKDOWN_GUIDANCE[stylePreset],
         "Preserve the original intent and meaning.",
+        ...rephraseInstructionBlock,
         "Keep the same language as the original draft unless the draft itself asks to change language.",
         "Use only Discord-compatible markdown.",
         "Do not use em dashes or semicolons unless the draft clearly requires them. Prefer commas, periods, or simpler sentence structure instead.",
